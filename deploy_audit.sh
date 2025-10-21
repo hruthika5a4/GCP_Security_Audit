@@ -40,16 +40,13 @@ fi
 
 # --- Step 4: Deploy Function ---
 echo "🚀 Deploying Cloud Function..."
-gcloud functions deploy $FUNCTION_NAME \
-  --runtime=$RUNTIME \
+gcloud functions deploy security_audit \
+  --runtime python312 \
   --trigger-http \
   --allow-unauthenticated \
-  --region=$REGION \
-  --entry-point=$ENTRY_POINT \
-  --source=. \
-  --memory=512MB \
-  --timeout=540s \
-  --quiet
+  --region=asia-south1 \
+  --entry-point=security_audit
+
 
 # --- Step 5: Get Function URL ---
 URL=$(gcloud functions describe $FUNCTION_NAME --region=$REGION --format='value(httpsTrigger.url)')

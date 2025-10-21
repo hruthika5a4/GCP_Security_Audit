@@ -1,0 +1,7 @@
+google-api-python-client>=2.70.0
+google-auth
+google-cloud-storage>=2.10.0
+requests>=2.28.0
+openpyxl
+Flask==2.2.5
+Werkzeug==2.3.8

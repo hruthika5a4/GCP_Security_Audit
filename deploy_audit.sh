@@ -9,7 +9,7 @@ set -e
 PROJECT_ID=$(gcloud config get-value project 2>/dev/null)
 REGION="asia-south1"
 FUNCTION_NAME="security_audit_1"
-ENTRY_POINT="security_audit"
+ENTRY_POINT="GCP_Security_Audit"
 RUNTIME="python311"
 
 echo "-----------------------------------------"

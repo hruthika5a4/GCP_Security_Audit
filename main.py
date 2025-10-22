@@ -63,59 +63,113 @@ def security_audit(request):
     # ----------------- Send Email -----------------
     status = send_audit_email(project, excel_path, "hruthika.sa258@gmail.com")
 
-    # --- Build HTML dashboard ---
+    
+    # --- Build Beautiful HTML Dashboard ---
     html = f"""
     <html>
     <head>
-        <title>🔒 GCP Security Audit Dashboard</title>
+        <title>GCP Security Audit Dashboard</title>
+        <meta charset="UTF-8">
         <script src="https://cdn.tailwindcss.com"></script>
+        <style>
+            body {{
+                background-color: #f8fafc;
+                font-family: 'Inter', sans-serif;
+            }}
+            .section-card {{
+                transition: transform 0.2s ease, box-shadow 0.2s ease;
+            }}
+            .section-card:hover {{
+                transform: translateY(-4px);
+                box-shadow: 0 4px 14px rgba(0,0,0,0.1);
+            }}
+            table {{
+                width: 100%;
+                border-collapse: collapse;
+                margin-top: 1rem;
+            }}
+            th, td {{
+                padding: 0.6rem;
+                text-align: left;
+                border-bottom: 1px solid #e5e7eb;
+            }}
+            th {{
+                background-color: #eff6ff;
+                color: #1d4ed8;
+                font-weight: 600;
+            }}
+        </style>
     </head>
-    <body class="bg-gray-50 text-gray-900">
-        <div class="max-w-5xl mx-auto mt-10 p-6 bg-white shadow-lg rounded-lg">
-            <h1 class="text-3xl font-bold text-center text-blue-700 mb-4">
+    <body class="min-h-screen flex flex-col items-center">
+        <div class="w-full max-w-6xl mt-10 mb-10 bg-white shadow-lg rounded-2xl p-8">
+            <h1 class="text-4xl font-extrabold text-center text-blue-700 mb-2">
                 🔒 GCP Security Audit Dashboard
             </h1>
-            <p class="text-center text-gray-600 mb-6">
-                Project: {project} | Time: {datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")}
+            <p class="text-center text-gray-500 mb-8">
+                Project: <span class="font-semibold text-gray-700">{project}</span> |
+                Time: <span class="text-gray-600">{datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")}</span>
             </p>
     """
 
+    # ---- Data Sections ----
     sections = [
         ("Compute Engine", vm_data),
         ("Cloud SQL", sql_data),
         ("GKE Clusters", gke_data),
         ("IAM Owners", owner_data),
         ("Buckets", bucket_data),
-        ("LB", lb_data),
-        ("org_data",org_data),
-        ("logging_data",logging_data),
-        ("networking_data",networking_data),
-        ("ip_forwarding",ip_forwarding)
+        ("Load Balancers", lb_data),
+        ("Organization Policies", org_data),
+        ("Logging Data", logging_data),
+        ("Networking Data", networking_data),
+        ("IP Forwarding", ip_forwarding)
     ]
 
     for category, data in sections:
         html += f"""
-        <div class='border border-gray-200 rounded-lg p-4 mb-4'>
-            <h2 class='text-xl font-semibold text-blue-600 mb-2'>{category}</h2>
+        <div class="section-card border border-gray-200 rounded-xl p-6 mb-6">
+            <h2 class="text-2xl font-semibold text-blue-600 mb-3">{category}</h2>
         """
         if data:
-            html += "<ul class='list-disc pl-6 text-gray-700'>"
+            html += """
+            <div class="overflow-x-auto">
+                <table class="table-auto text-sm text-gray-700">
+                    <thead>
+                        <tr>
+            """
+            # Determine column count dynamically
+            col_count = len(data[0]) if len(data) > 0 else 0
+            for i in range(col_count):
+                html += f"<th>Column {i+1}</th>"
+            html += "</tr></thead><tbody>"
+
             for row in data:
-                html += f"<li>{' | '.join(map(str, row))}</li>"
-            html += "</ul>"
+                html += "<tr>"
+                for cell in row:
+                    html += f"<td>{str(cell)}</td>"
+                html += "</tr>"
+
+            html += "</tbody></table></div>"
         else:
-            html += "<p class='text-green-600'>✅ No issues found.</p>"
+            html += "<p class='text-green-600 font-medium'>✅ No issues found.</p>"
         html += "</div>"
 
     html += f"""
-        <p class="text-center text-green-700 font-semibold mt-6">
-            ✅ {status}
-        </p>
+        <div class="mt-10 text-center">
+            <p class="text-green-700 text-lg font-semibold">✅ {status}</p>
         </div>
+    </div>
+
+    <footer class="text-center text-gray-400 text-sm py-4">
+        © {datetime.utcnow().year} Security Audit | Built with ❤️ and Python
+    </footer>
+
     </body>
     </html>
     """
 
+
     response = make_response(html)
     response.headers['Content-Type'] = 'text/html'
     return response
+

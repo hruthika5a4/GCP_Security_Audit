@@ -6,7 +6,7 @@ import os
 
 def send_audit_email(project, excel_path, to_email):
     sender_email = "crtproject258@gmail.com"
-    sender_app_password = "lxizhrythimuyopuyrdzastabwg"
+    sender_app_password = "lxiz muyd zast abwg"
 
     html_output = f"<h2>🔍 GCP Security Audit Report for Project: {project}</h2>"
 
@@ -28,4 +28,5 @@ def send_audit_email(project, excel_path, to_email):
         return "✅ Email sent successfully."
     except Exception as e:
         return f"⚠️ Failed to send email: {e}"
+
 

@@ -4,6 +4,7 @@ from report_excel import create_excel_report
 from report_email import send_audit_email
 from datetime import datetime
 
+
 def security_audit(request):
     creds, project = default()
 
@@ -16,40 +17,32 @@ def security_audit(request):
     lb_data = check_load_balancers()
 
     # ----------------- CIS Checks -----------------
-    cis_results = audit_cis()  # Returns a dict with all CIS checks
+    cis_results = audit_cis()
 
-    # Format CIS results for Excel
-    networking_data = []  # You can use SSH/RDP/firewall logs here
-    logging_data = []     # Cloud NAT / VPC flow logs
-    org_data = []         # Placeholder for Org policies (if any)
-    ip_forwarding =[]
-    # Example formatting:
-    # SSH Firewall
+    networking_data = []
+    logging_data = []
+    org_data = []
+    ip_forwarding = []
+
     for ssh in cis_results.get("ssh_firewall", []):
-        networking_data.append(["SSH Firewall", ssh[0], "Logging Enabled: " + str(ssh[1]), ssh[2]])
+        networking_data.append(["SSH Firewall", ssh[0], f"Logging Enabled: {ssh[1]}", ssh[2]])
 
-    # RDP Firewall
     for rdp in cis_results.get("rdp_firewall", []):
-        networking_data.append(["RDP Firewall", rdp[0], "Logging Enabled: " + str(rdp[1]), rdp[2]])
+        networking_data.append(["RDP Firewall", rdp[0], f"Logging Enabled: {rdp[1]}", rdp[2]])
 
-    # All Firewall Logs
     for fw in cis_results.get("firewall_logs", []):
-        logging_data.append(["Firewall Rule", fw[0], "Logging Enabled: " + str(fw[1]), fw[2]])
+        logging_data.append(["Firewall Rule", fw[0], f"Logging Enabled: {fw[1]}", fw[2]])
 
-    # VPC Flow Logs
     for vpc in cis_results.get("vpc_flow_logs", []):
         logging_data.append(["VPC Flow Logs", vpc[0], f"Flow Enabled: {vpc[1]}, Sample Rate: {vpc[2]}", vpc[3]])
 
-    # Cloud NAT Logs
     for nat in cis_results.get("cloud_nat_logs", []):
         logging_data.append(["Cloud NAT", nat[0], f"Router: {nat[1]}, Logging Enabled: {nat[2]}", nat[3]])
-    # ----------------- IP Forwarding Logs -----------------
+
     for ipf in cis_results.get("ip_forwarding", []):
-        # Check if this is an instance result or an error string
         if isinstance(ipf, list) and len(ipf) == 3:
-            ip_forwarding.append(["Compute Instance", ipf[0], "canIpForward: " + str(ipf[1]), ipf[2]])
+            ip_forwarding.append(["Compute Instance", ipf[0], f"canIpForward: {ipf[1]}", ipf[2]])
         else:
-            # Error message
             ip_forwarding.append(["Compute Instance", str(ipf), "", "ERROR"])
 
     # ----------------- Create Excel -----------------
@@ -61,10 +54,9 @@ def security_audit(request):
     )
 
     # ----------------- Send Email -----------------
-    status = send_audit_email(project, excel_path, "hruthika.sa258@gmail.com")
+    status = send_audit_email(project, excel_path, "pradeepsinghania906@gmail.com")
 
-    
-    # --- Build Beautiful HTML Dashboard ---
+    # ----------------- Build Beautiful HTML Dashboard -----------------
     html = f"""
     <html>
     <head>
@@ -73,30 +65,34 @@ def security_audit(request):
         <script src="https://cdn.tailwindcss.com"></script>
         <style>
             body {{
-                background-color: #f8fafc;
+                background-color: #f9fafb;
                 font-family: 'Inter', sans-serif;
             }}
             .section-card {{
                 transition: transform 0.2s ease, box-shadow 0.2s ease;
             }}
             .section-card:hover {{
-                transform: translateY(-4px);
+                transform: translateY(-3px);
                 box-shadow: 0 4px 14px rgba(0,0,0,0.1);
             }}
             table {{
                 width: 100%;
                 border-collapse: collapse;
-                margin-top: 1rem;
+                margin-top: 0.8rem;
             }}
             th, td {{
-                padding: 0.6rem;
+                padding: 0.6rem 0.8rem;
                 text-align: left;
                 border-bottom: 1px solid #e5e7eb;
+                font-size: 0.9rem;
             }}
             th {{
                 background-color: #eff6ff;
-                color: #1d4ed8;
+                color: #1e40af;
                 font-weight: 600;
+            }}
+            td {{
+                color: #374151;
             }}
         </style>
     </head>
@@ -111,7 +107,21 @@ def security_audit(request):
             </p>
     """
 
-    # ---- Data Sections ----
+    # Define section headers
+    section_headers = {
+        "Compute Engine": ["Instance Name", "External IP", "Zone/Status"],
+        "Cloud SQL": ["Instance", "Public IP", "Region"],
+        "GKE Clusters": ["Cluster Name", "Endpoint", "Status"],
+        "IAM Owners": ["Email", "Role", "Type"],
+        "Buckets": ["Bucket Name", "Access Level", "Policy"],
+        "Load Balancers": ["Name", "Type", "Frontend", "Backend"],
+        "Organization Policies": ["Policy Name", "Constraint", "Status"],
+        "Logging Data": ["Resource", "Setting", "Description", "Result"],
+        "Networking Data": ["Firewall / Network", "Rule", "Setting", "Result"],
+        "IP Forwarding": ["Instance", "canIpForward", "Status", "Result"]
+    }
+
+    # Define sections
     sections = [
         ("Compute Engine", vm_data),
         ("Cloud SQL", sql_data),
@@ -125,35 +135,29 @@ def security_audit(request):
         ("IP Forwarding", ip_forwarding)
     ]
 
+    # Generate table layout for each section
     for category, data in sections:
         html += f"""
         <div class="section-card border border-gray-200 rounded-xl p-6 mb-6">
             <h2 class="text-2xl font-semibold text-blue-600 mb-3">{category}</h2>
         """
         if data:
-            html += """
-            <div class="overflow-x-auto">
-                <table class="table-auto text-sm text-gray-700">
-                    <thead>
-                        <tr>
-            """
-            # Determine column count dynamically
-            col_count = len(data[0]) if len(data) > 0 else 0
-            for i in range(col_count):
-                html += f"<th>Column {i+1}</th>"
+            headers = section_headers.get(category, [f"Column {i+1}" for i in range(len(data[0]))])
+            html += "<div class='overflow-x-auto'><table class='table-auto text-sm text-gray-700'><thead><tr>"
+            for h in headers:
+                html += f"<th>{h}</th>"
             html += "</tr></thead><tbody>"
-
             for row in data:
                 html += "<tr>"
                 for cell in row:
                     html += f"<td>{str(cell)}</td>"
                 html += "</tr>"
-
             html += "</tbody></table></div>"
         else:
             html += "<p class='text-green-600 font-medium'>✅ No issues found.</p>"
         html += "</div>"
 
+    # Footer
     html += f"""
         <div class="mt-10 text-center">
             <p class="text-green-700 text-lg font-semibold">✅ {status}</p>
@@ -161,15 +165,12 @@ def security_audit(request):
     </div>
 
     <footer class="text-center text-gray-400 text-sm py-4">
-        © {datetime.utcnow().year} Security Audit | Built with ❤️ and Python
+        © {datetime.utcnow().year} GCP Security Audit | Built with ❤️ and Python
     </footer>
-
     </body>
     </html>
     """
 
-
     response = make_response(html)
     response.headers['Content-Type'] = 'text/html'
     return response
-

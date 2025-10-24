@@ -1,10 +1,24 @@
+# ----------------- main.py -----------------
 from flask import make_response
-from audit_checks import *
+from datetime import datetime
+from google.auth import default
+from audit_checks import (
+    check_compute_public_ips,
+    check_sql_public_ips,
+    check_gke_clusters,
+    check_owner_service_accounts,
+    check_public_buckets,
+    check_load_balancers,
+    check_firewall_vulnerabilities,
+    check_vpc_flow_logs,
+    check_cloud_nat_logs,
+    check_ip_forwarding
+)
 from report_excel import create_excel_report
 from report_email import send_audit_email
-from datetime import datetime
 
 
+# ----------------- Recommendation Logic -----------------
 def get_recommendation(category, row):
     """Generate recommendation text based on category"""
     category = category.lower()
@@ -22,59 +36,40 @@ def get_recommendation(category, row):
         text = "Remove public access; apply uniform bucket-level access."
     elif "load balancer" in category:
         text = "Restrict frontend access to trusted IP ranges or use Cloud Armor."
-    elif "firewall" in category or "logging" in category:
-        text = "Enable firewall and VPC flow logging for better visibility."
-    elif "network" in category:
-        text = "Restrict open ports (SSH/RDP) and apply IP-based filtering."
+    elif "firewall" in category:
+        text = "Restrict 0.0.0.0/0 source ranges and avoid open SSH/RDP ports."
+    elif "vpc" in category or "logging" in category:
+        text = "Enable VPC flow and firewall logging for better network visibility."
+    elif "cloud nat" in category:
+        text = "Enable Cloud NAT logging for audit and troubleshooting."
     elif "ip forwarding" in category:
-        text = "Disable IP forwarding unless the VM is a NAT/router."
+        text = "Disable IP forwarding unless VM acts as NAT/router."
     return text
 
 
+# ----------------- Main Audit Function -----------------
 def security_audit(request):
     creds, project = default()
 
-    # ----------------- Run checks -----------------
+    # ----------------- Run All Checks -----------------
     vm_data = check_compute_public_ips()
     sql_data = check_sql_public_ips()
     gke_data = check_gke_clusters()
     owner_data = check_owner_service_accounts()
     bucket_data = check_public_buckets()
     lb_data = check_load_balancers()
-    cis_results = audit_cis()
+    firewall_data = check_firewall_vulnerabilities()
+    vpc_flow_data = check_vpc_flow_logs()
+    nat_data = check_cloud_nat_logs()
+    ip_forward_data = check_ip_forwarding()
 
-    networking_data, logging_data, org_data, ip_forwarding = [], [], [], []
-
-    # CIS checks formatting
-    for ssh in cis_results.get("ssh_firewall", []):
-        networking_data.append(["SSH Firewall", ssh[0], f"Logging Enabled: {ssh[1]}"])
-    for rdp in cis_results.get("rdp_firewall", []):
-        networking_data.append(["RDP Firewall", rdp[0], f"Logging Enabled: {rdp[1]}"])
-    for fw in cis_results.get("firewall_logs", []):
-        logging_data.append(["Firewall Rule", fw[0], f"Logging Enabled: {fw[1]}"])
-    for vpc in cis_results.get("vpc_flow_logs", []):
-        logging_data.append(["VPC Flow Logs", vpc[0], f"Flow Enabled: {vpc[1]}, Sample Rate: {vpc[2]}"])
-    for nat in cis_results.get("cloud_nat_logs", []):
-        logging_data.append(["Cloud NAT", nat[0], f"Router: {nat[1]}, Logging Enabled: {nat[2]}"])
-
-    # ✅ Fixed: IP Forwarding formatting
-    for ipf in cis_results.get("ip_forwarding", []):
-        if isinstance(ipf, list) and len(ipf) == 3:
-            instance_name = ipf[0]
-            can_ip_forward = ipf[1]
-            status = ipf[2] if len(ipf) > 2 else ""
-            ip_forwarding.append(["Compute Instance", instance_name, str(can_ip_forward)])
-        elif isinstance(ipf, list) and len(ipf) == 2:
-            ip_forwarding.append(["Compute Instance", ipf[0], str(ipf[1]), ""])
-        else:
-            ip_forwarding.append(["Compute Instance", str(ipf), "", ""])
-
-    # ----------------- Excel + Email -----------------
+    # ----------------- Excel Report -----------------
     excel_path = create_excel_report(
         project, vm_data, sql_data, gke_data, owner_data,
-        bucket_data, networking_data, logging_data, org_data,
-        lb_data, ip_forwarding
+        bucket_data, firewall_data, vpc_flow_data, nat_data,
+        lb_data, ip_forward_data
     )
+
     status = send_audit_email(project, excel_path, "pradeepsinghania906@gmail.com")
 
     # ----------------- HTML UI -----------------
@@ -123,19 +118,21 @@ def security_audit(request):
             </p>
     """
 
+    # ----------------- Display Sections -----------------
     sections = [
         ("Compute Engine", vm_data, ["Instance Name", "Zone", "External IP"]),
         ("Cloud SQL", sql_data, ["Instance Name", "Public IP"]),
         ("GKE Clusters", gke_data, ["Cluster Name", "Endpoint"]),
         ("IAM Owners", owner_data, ["Account", "Role"]),
         ("Buckets", bucket_data, ["Bucket Name", "Access Level", "Entity"]),
-        ("Load Balancers", lb_data, ["LB Name", "Type"]),
-        ("Logging Checks", logging_data, ["Resource", "Details", "Logging Enabled Status"]),
-        ("Networking Checks", networking_data, ["Resource", "Rule", "Status"]),
-        ("IP Forwarding", ip_forwarding, ["Type", "Instance Name", "canIpForward Status"]),
+        ("Load Balancers", lb_data, ["LB Name", "Scheme", "IP", "Target", "SSL Policy", "Cloud Armor"]),
+        ("Firewall Rules", firewall_data, ["Rule Name", "Port/Protocol", "Source Ranges", "Status", "Reason"]),
+        ("VPC Flow Logs", vpc_flow_data, ["Subnet", "Region", "Flow Enabled", "Sample Rate", "Status", "Reason"]),
+        ("Cloud NAT Logs", nat_data, ["NAT Name", "Router", "Logging Enabled", "Status", "Reason"]),
+        ("IP Forwarding", ip_forward_data, ["Instance", "Can IP Forward", "Status", "Reason"]),
     ]
 
-    # ----------------- Build tables -----------------
+    # ----------------- Build Tables -----------------
     for category, data, headers in sections:
         html += f"""
         <div class='border border-gray-200 rounded-lg p-4 mb-6'>
@@ -146,6 +143,7 @@ def security_audit(request):
             for h in headers:
                 html += f"<th>{h}</th>"
             html += "<th>Recommendation</th></tr></thead><tbody>"
+
             for row in data:
                 html += "<tr class='hover:bg-gray-50'>"
                 for cell in row:
@@ -154,13 +152,11 @@ def security_audit(request):
                 html += f"<td>{rec}</td></tr>"
             html += "</tbody></table></div>"
         else:
-            html += "<p class='text-green-600 font-medium'>No issues found.</p>"
+            html += "<p class='text-green-600 font-medium'>✅ No issues found.</p>"
         html += "</div>"
 
     html += f"""
-        <p class="text-center text-green-700 font-semibold mt-6">
-            {status}
-        </p>
+        <p class="text-center text-green-700 font-semibold mt-6">{status}</p>
         </div>
     </body>
     </html>

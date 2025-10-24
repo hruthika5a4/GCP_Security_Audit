@@ -9,8 +9,8 @@ set -e
 PROJECT_ID=$(gcloud config get-value project 2>/dev/null)
 REGION="asia-south1"
 FUNCTION_NAME="security_audit_2"
-ENTRY_POINT="GCP_Security_Audit"
-RUNTIME="python311"
+ENTRY_POINT="security_audit"
+RUNTIME="python312"
 
 echo "-----------------------------------------"
 echo "🔹 Starting Security Audit Cloud Function Setup"
@@ -40,16 +40,15 @@ fi
 
 # --- Step 4: Deploy Function ---
 echo "🚀 Deploying Cloud Function..."
-gcloud functions deploy security_audit_122 \
-  --runtime python312 \
+gcloud functions deploy "$FUNCTION_NAME" \
+  --runtime="$RUNTIME" \
   --trigger-http \
   --allow-unauthenticated \
-  --region=asia-south1 \
-  --entry-point=security_audit
-
+  --region="$REGION" \
+  --entry-point="$ENTRY_POINT"
 
 # --- Step 5: Get Function URL ---
-URL=$(gcloud functions describe $FUNCTION_NAME --region=$REGION --format='value(httpsTrigger.url)')
+URL=$(gcloud functions describe "$FUNCTION_NAME" --region="$REGION" --format='value(httpsTrigger.url)')
 echo "✅ Deployment Complete!"
 echo "🌐 Function URL: $URL"
 echo "-----------------------------------------"

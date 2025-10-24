@@ -38,14 +38,18 @@ if [[ -f requirements.txt ]]; then
   pip install -r requirements.txt -t lib/
 fi
 
-# --- Step 4: Deploy Function ---
-echo "🚀 Deploying Cloud Function..."
+# Delete existing function first (if needed)
+gcloud functions delete "$FUNCTION_NAME" --region="$REGION" --quiet
+
+# Deploy with explicit name and entry point
 gcloud functions deploy "$FUNCTION_NAME" \
   --runtime="$RUNTIME" \
   --trigger-http \
   --allow-unauthenticated \
   --region="$REGION" \
-  --entry-point="$ENTRY_POINT"
+  --entry-point=security_audit \
+  --timeout=540s
+
 
 # --- Step 5: Get Function URL ---
 URL=$(gcloud functions describe "$FUNCTION_NAME" --region="$REGION" --format='value(httpsTrigger.url)')

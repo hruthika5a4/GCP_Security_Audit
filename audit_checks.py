@@ -124,132 +124,113 @@ def check_load_balancers():
     return lb_data
 
 
-def audit_cis():
-    results = {
-        "firewall_vulnerabilities": [],
-        "vpc_flow_logs": [],
-        "cloud_nat_logs": [],
-        "ip_forwarding": []
-    }
+from googleapiclient import discovery
+from google.auth import default
 
+# ----------------- Credentials -----------------
+creds, project = default()
+
+# ----------------- 1. Firewall Vulnerabilities -----------------
+def check_firewall_vulnerabilities():
+    compute = discovery.build('compute', 'v1', credentials=creds)
+    firewall_data = []
     try:
-        compute = discovery.build('compute', 'v1', credentials=creds)
+        req = compute.firewalls().list(project=project)
+        while req is not None:
+            res = req.execute()
+            for fw in res.get('items', []):
+                name = fw.get('name', 'N/A')
+                direction = fw.get('direction', 'INGRESS')
+                allowed = fw.get('allowed', [])
+                source_ranges = fw.get('sourceRanges', [])
+                
+                for rule in allowed:
+                    ports = rule.get('ports', ['all'])
+                    proto = rule.get('IPProtocol', 'all')
 
-        # ----------------- Firewall Rule Vulnerabilities -----------------
-        try:
-            request = compute.firewalls().list(project=project)
-            while request is not None:
-                response = request.execute()
-                for fw in response.get('items', []):
-                    fw_name = fw.get('name', 'unknown')
-                    direction = fw.get('direction', 'INGRESS')
-                    log_enabled = fw.get('logConfig', {}).get('enable', False)
-                    allowed = fw.get('allowed', [])
-                    source_ranges = fw.get('sourceRanges', [])
-
-                    for rule in allowed:
-                        ports = rule.get('ports', ['all'])
-                        protocol = rule.get('IPProtocol', 'all')
-
-                        # ---- Check vulnerabilities ----
-                        if '0.0.0.0/0' in source_ranges and direction == 'INGRESS':
-                            if protocol in ['tcp', 'udp', 'all']:
-                                results["firewall_vulnerabilities"].append([
-                                    fw_name,
-                                    f"{protocol.upper()} ports: {','.join(ports)}",
-                                    source_ranges,
-                                    "VIOLATION",
-                                    "Unrestricted public access (0.0.0.0/0)"
-                                ])
-                            if '22' in ports:
-                                results["firewall_vulnerabilities"].append([
-                                    fw_name,
-                                    "SSH (TCP/22)",
-                                    source_ranges,
-                                    "VIOLATION",
-                                    "Public SSH access is open"
-                                ])
-                            if '3389' in ports:
-                                results["firewall_vulnerabilities"].append([
-                                    fw_name,
-                                    "RDP (TCP/3389)",
-                                    source_ranges,
-                                    "VIOLATION",
-                                    "Public RDP access is open"
-                                ])
+                    if '0.0.0.0/0' in source_ranges and direction == 'INGRESS':
+                        if '22' in ports:
+                            firewall_data.append([name, "SSH (22)", source_ranges, "VIOLATION", "Public SSH access"])
+                        elif '3389' in ports:
+                            firewall_data.append([name, "RDP (3389)", source_ranges, "VIOLATION", "Public RDP access"])
                         else:
-                            results["firewall_vulnerabilities"].append([
-                                fw_name,
-                                f"{protocol.upper()} ports: {','.join(ports)}",
-                                source_ranges,
-                                "PASS",
-                                "No public access detected"
-                            ])
-                request = compute.firewalls().list_next(previous_request=request, previous_response=response)
-        except Exception as e:
-            results['firewall_vulnerabilities'].append(["Error", str(e), "VIOLATION", "Firewall check failed"])
+                            firewall_data.append([name, f"{proto}:{ports}", source_ranges, "VIOLATION", "Public access allowed"])
+                    else:
+                        firewall_data.append([name, f"{proto}:{ports}", source_ranges, "PASS", "No public access"])
+            req = compute.firewalls().list_next(req, res)
+    except Exception as e:
+        firewall_data.append(["Error", str(e), "VIOLATION", "Firewall check failed"])
+    return firewall_data
 
-        # ----------------- VPC Flow Logs -----------------
-        try:
-            regions = compute.regions().list(project=project).execute().get('items', [])
-            for region in regions:
-                region_name = region['name']
-                req = compute.subnetworks().list(project=project, region=region_name)
-                while req is not None:
-                    response = req.execute()
-                    for subnet in response.get('items', []):
-                        flow_enabled = subnet.get('enableFlowLogs', False)
-                        sample_rate = subnet.get('logConfig', {}).get('flowSampling', 0)
-                        status = "PASS" if flow_enabled else "VIOLATION"
-                        reason = "Flow logs disabled" if not flow_enabled else "Flow logs enabled"
-                        results['vpc_flow_logs'].append([subnet['name'], region_name, flow_enabled, sample_rate, status, reason])
-                    req = compute.subnetworks().list_next(previous_request=req, previous_response=response)
-        except Exception as e:
-            results['vpc_flow_logs'].append(["Error", str(e), "VIOLATION", "VPC Flow log check failed"])
 
-        # ----------------- Cloud NAT Logs -----------------
-        try:
-            for region in regions:
-                region_name = region['name']
-                req = compute.routers().list(project=project, region=region_name)
-                while req is not None:
-                    response = req.execute()
-                    for router in response.get('items', []):
-                        router_name = router['name']
-                        try:
-                            nat_req = compute.routers().getNatMappingInfo(project=project, region=region_name, router=router_name)
-                            nat_response = nat_req.execute()
-                            for nat_info in nat_response.get('result', []):
-                                nat_name = nat_info.get('name', 'unknown')
-                                log_enabled = nat_info.get('logConfig', {}).get('enable', False)
-                                status = "PASS" if log_enabled else "VIOLATION"
-                                reason = "Logging disabled" if not log_enabled else "Logging enabled"
-                                results['cloud_nat_logs'].append([nat_name, router_name, log_enabled, status, reason])
-                        except Exception:
-                            continue
-                    req = compute.routers().list_next(previous_request=req, previous_response=response)
-        except Exception as e:
-            results['cloud_nat_logs'].append(["Error", str(e), "VIOLATION", "NAT log check failed"])
-
-        # ----------------- IP Forwarding -----------------
-        try:
-            req = compute.instances().aggregatedList(project=project)
+# ----------------- 2. VPC Flow Logs -----------------
+def check_vpc_flow_logs():
+    compute = discovery.build('compute', 'v1', credentials=creds)
+    vpc_flow_data = []
+    try:
+        regions = compute.regions().list(project=project).execute().get('items', [])
+        for region in regions:
+            region_name = region['name']
+            req = compute.subnetworks().list(project=project, region=region_name)
             while req is not None:
                 res = req.execute()
-                for zone, scoped_list in res.get('items', {}).items():
-                    for instance in scoped_list.get('instances', []):
-                        name = instance['name']
-                        can_forward = instance.get('canIpForward', False)
-                        status = "VIOLATION" if can_forward else "PASS"
-                        reason = "IP forwarding enabled (may allow spoofing)" if can_forward else "Safe"
-                        results['ip_forwarding'].append([name, can_forward, status, reason])
-                req = compute.instances().aggregatedList_next(req, res)
-        except Exception as e:
-            results['ip_forwarding'].append(["Error", str(e), "VIOLATION", "IP forwarding check failed"])
-
+                for subnet in res.get('items', []):
+                    flow_enabled = subnet.get('enableFlowLogs', False)
+                    sample_rate = subnet.get('logConfig', {}).get('flowSampling', 0)
+                    status = "PASS" if flow_enabled else "VIOLATION"
+                    reason = "Flow logs enabled" if flow_enabled else "Flow logs disabled"
+                    vpc_flow_data.append([subnet['name'], region_name, flow_enabled, sample_rate, status, reason])
+                req = compute.subnetworks().list_next(req, res)
     except Exception as e:
-        results['firewall_vulnerabilities'].append(["CIS audit failed", str(e), "VIOLATION", "Script execution error"])
+        vpc_flow_data.append(["Error", str(e), "VIOLATION", "VPC flow log check failed"])
+    return vpc_flow_data
 
-    return results
+
+# ----------------- 3. Cloud NAT Logs -----------------
+def check_cloud_nat_logs():
+    compute = discovery.build('compute', 'v1', credentials=creds)
+    nat_data = []
+    try:
+        regions = compute.regions().list(project=project).execute().get('items', [])
+        for region in regions:
+            region_name = region['name']
+            req = compute.routers().list(project=project, region=region_name)
+            while req is not None:
+                res = req.execute()
+                for router in res.get('items', []):
+                    router_name = router['name']
+                    for nat in router.get('nats', []):
+                        nat_name = nat.get('name', 'unknown')
+                        log_enabled = nat.get('logConfig', {}).get('enable', False)
+                        status = "PASS" if log_enabled else "VIOLATION"
+                        reason = "Logging enabled" if log_enabled else "Logging disabled"
+                        nat_data.append([nat_name, router_name, log_enabled, status, reason])
+                req = compute.routers().list_next(req, res)
+    except Exception as e:
+        nat_data.append(["Error", str(e), "VIOLATION", "Cloud NAT log check failed"])
+    return nat_data
+
+
+# ----------------- 4. IP Forwarding -----------------
+def check_ip_forwarding():
+    compute = discovery.build('compute', 'v1', credentials=creds)
+    ip_forward_data = []
+    try:
+        req = compute.instances().aggregatedList(project=project)
+        while req is not None:
+            res = req.execute()
+            for zone, scoped_list in res.get('items', {}).items():
+                for instance in scoped_list.get('instances', []):
+                    name = instance['name']
+                    can_forward = instance.get('canIpForward', False)
+                    status = "VIOLATION" if can_forward else "PASS"
+                    reason = "IP forwarding enabled (risk of spoofing)" if can_forward else "Safe"
+                    ip_forward_data.append([name, can_forward, status, reason])
+            req = compute.instances().aggregatedList_next(req, res)
+    except Exception as e:
+        ip_forward_data.append(["Error", str(e), "VIOLATION", "IP forwarding check failed"])
+    return ip_forward_data
+
+
 
 

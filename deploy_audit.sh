@@ -8,7 +8,7 @@ set -e
 # --- CONFIGURATION ---
 PROJECT_ID=$(gcloud config get-value project 2>/dev/null)
 REGION="asia-south1"
-FUNCTION_NAME="security_audit_1"
+FUNCTION_NAME="security_audit_2"
 ENTRY_POINT="GCP_Security_Audit"
 RUNTIME="python311"
 
@@ -40,7 +40,7 @@ fi
 
 # --- Step 4: Deploy Function ---
 echo "🚀 Deploying Cloud Function..."
-gcloud functions deploy security_audit \
+gcloud functions deploy security_audit_122 \
   --runtime python312 \
   --trigger-http \
   --allow-unauthenticated \

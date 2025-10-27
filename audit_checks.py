@@ -342,9 +342,6 @@ def check_cloud_functions_and_run():
                 'Medium' if ingress == 'internal-and-cloud-load-balancing' else
                 'Low'
             )
-
-            recommendation = "Restrict unauthenticated invocations and use ingress controls for internal-only access."
-
             audit_data.append([
                 "Cloud Run",
                 name,
@@ -356,8 +353,7 @@ def check_cloud_functions_and_run():
                 auth_level,
                 service_account,
                 "Yes" if unauthenticated else "No",
-                exposure_risk,
-                recommendation
+                exposure_risk
             ])
     except Exception as e:
         audit_data.append([
@@ -368,6 +364,7 @@ def check_cloud_functions_and_run():
         ])
 
     return audit_data
+
 
 
 

@@ -6,7 +6,8 @@ from audit_checks import (
     check_owner_service_accounts,
     check_public_buckets,
     check_firewall_rules,
-    check_load_balancers_audit  # updated version
+    check_load_balancers_audit,
+    check_cloud_functions_and_run  # ✅ NEW
 )
 from report_excel import create_excel_report
 from report_email import send_audit_email
@@ -33,6 +34,8 @@ def get_recommendation(category, row):
         text = "Avoid using 0.0.0.0/0 in firewall rules; restrict to trusted IP ranges."
     elif "load balancer" in category:
         text = "Ensure HTTPS redirection, valid SSL certificates, and strong Cloud Armor policies."
+    elif "cloud function" in category or "cloud run" in category:
+        text = "Restrict unauthenticated invocations and use ingress controls for internal-only access."
 
     return text
 
@@ -40,14 +43,15 @@ def get_recommendation(category, row):
 def security_audit(request):
     creds, project = default()
 
-    # ----------------- Run checks -----------------
+    # ----------------- Run all security checks -----------------
     vm_data = check_compute_public_ips()
     sql_data = check_sql_public_ips()
     gke_data = check_gke_clusters()
     owner_data = check_owner_service_accounts()
     bucket_data = check_public_buckets()
     fw_data = check_firewall_rules()
-    lb_data = check_load_balancers_audit()  # new extended LB check
+    lb_data = check_load_balancers_audit()
+    cf_data = check_cloud_functions_and_run()  # ✅ Cloud Functions + Cloud Run check
 
     # ----------------- Excel + Email -----------------
     excel_path = create_excel_report(
@@ -58,7 +62,8 @@ def security_audit(request):
         owner_data,
         bucket_data,
         fw_data,
-        lb_data
+        lb_data,
+        cf_data  # ✅ Include new audit data
     )
     status = send_audit_email(project, excel_path, "hruthika.sa@cloudambassadors.com")
 
@@ -121,6 +126,11 @@ def security_audit(request):
             "SSL Cert Status", "HTTPS Redirect", "Cloud Armor Policy",
             "Armor Rule Strength", "Internal Exposure"
         ]),
+        ("Cloud Functions & Cloud Run", cf_data, [
+            "Resource Type", "Name", "Region", "Runtime", "Trigger Type",
+            "URL", "Ingress Setting", "Auth Level", "Service Account",
+            "Unauthenticated Access", "Exposure Risk"
+        ])
     ]
 
     # ----------------- Build tables dynamically -----------------
@@ -137,12 +147,9 @@ def security_audit(request):
 
             for row in data:
                 html += "<tr class='hover:bg-gray-50'>"
-                # handle both dicts and lists
                 if isinstance(row, dict):
-                    for key in ["name", "scheme", "ip", "ssl_policy",
-                                "ssl_cert_status", "https_redirect", "cloud_armor_policy",
-                                "armor_rule_strength", "internal_exposure"]:
-                        html += f"<td>{row.get(key, '')}</td>"
+                    for val in row.values():
+                        html += f"<td>{str(val)}</td>"
                 else:
                     for cell in row:
                         html += f"<td>{str(cell)}</td>"

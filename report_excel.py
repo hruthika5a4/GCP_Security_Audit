@@ -124,7 +124,6 @@ def create_excel_report(
             "LB Name",
             "Scheme",
             "IP",
-            "Target",
             "SSL Policy",
             "Cloud Armor Policy",
             "Valid SSL Certificate",
@@ -140,4 +139,3 @@ def create_excel_report(
     path = f"/tmp/{project}_security_audit.xlsx"
     wb.save(path)
     return path
-

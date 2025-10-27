@@ -1,162 +1,116 @@
-# ----------------- main.py -----------------
 from flask import make_response
-from datetime import datetime
-from google.auth import default
-from audit_checks import (
-    check_compute_public_ips,
-    check_sql_public_ips,
-    check_gke_clusters,
-    check_owner_service_accounts,
-    check_public_buckets,
-    check_load_balancers,
-    check_firewall_vulnerabilities,
-    check_vpc_flow_logs,
-    check_cloud_nat_logs,
-    check_ip_forwarding
-)
+from audit_checks import *
 from report_excel import create_excel_report
 from report_email import send_audit_email
+from datetime import datetime
 
-
-# ----------------- Recommendation Logic -----------------
-def get_recommendation(category, row):
-    """Generate recommendation text based on category"""
-    category = category.lower()
-    text = "No issues found."
-
-    if "compute" in category:
-        text = "Avoid assigning external/public IPs to VMs unless absolutely required."
-    elif "sql" in category:
-        text = "Use private IP for Cloud SQL and restrict public access."
-    elif "gke" in category:
-        text = "Restrict public endpoint access and enable authorized networks."
-    elif "iam" in category:
-        text = "Avoid using 'Owner' role; follow least privilege principle."
-    elif "bucket" in category:
-        text = "Remove public access; apply uniform bucket-level access."
-    elif "load balancer" in category:
-        text = "Restrict frontend access to trusted IP ranges or use Cloud Armor."
-    elif "firewall" in category:
-        text = "Restrict 0.0.0.0/0 source ranges and avoid open SSH/RDP ports."
-    elif "vpc" in category or "logging" in category:
-        text = "Enable VPC flow and firewall logging for better network visibility."
-    elif "cloud nat" in category:
-        text = "Enable Cloud NAT logging for audit and troubleshooting."
-    elif "ip forwarding" in category:
-        text = "Disable IP forwarding unless VM acts as NAT/router."
-    return text
-
-
-# ----------------- Main Audit Function -----------------
 def security_audit(request):
     creds, project = default()
 
-    # ----------------- Run All Checks -----------------
+    # ----------------- Existing resource checks -----------------
     vm_data = check_compute_public_ips()
     sql_data = check_sql_public_ips()
     gke_data = check_gke_clusters()
     owner_data = check_owner_service_accounts()
     bucket_data = check_public_buckets()
     lb_data = check_load_balancers()
-    firewall_data = check_firewall_vulnerabilities()
-    vpc_flow_data = check_vpc_flow_logs()
-    nat_data = check_cloud_nat_logs()
-    ip_forward_data = check_ip_forwarding()
 
-    # ----------------- Excel Report -----------------
+    # ----------------- CIS Checks -----------------
+    cis_results = audit_cis()  # Returns a dict with all CIS checks
+
+    # Format CIS results for Excel
+    networking_data = []  # You can use SSH/RDP/firewall logs here
+    logging_data = []     # Cloud NAT / VPC flow logs
+    org_data = []         # Placeholder for Org policies (if any)
+    ip_forwarding =[]
+    # Example formatting:
+    # SSH Firewall
+    for ssh in cis_results.get("ssh_firewall", []):
+        networking_data.append(["SSH Firewall", ssh[0], "Logging Enabled: " + str(ssh[1]), ssh[2]])
+
+    # RDP Firewall
+    for rdp in cis_results.get("rdp_firewall", []):
+        networking_data.append(["RDP Firewall", rdp[0], "Logging Enabled: " + str(rdp[1]), rdp[2]])
+
+    # All Firewall Logs
+    for fw in cis_results.get("firewall_logs", []):
+        logging_data.append(["Firewall Rule", fw[0], "Logging Enabled: " + str(fw[1]), fw[2]])
+
+    # VPC Flow Logs
+    for vpc in cis_results.get("vpc_flow_logs", []):
+        logging_data.append(["VPC Flow Logs", vpc[0], f"Flow Enabled: {vpc[1]}, Sample Rate: {vpc[2]}", vpc[3]])
+
+    # Cloud NAT Logs
+    for nat in cis_results.get("cloud_nat_logs", []):
+        logging_data.append(["Cloud NAT", nat[0], f"Router: {nat[1]}, Logging Enabled: {nat[2]}", nat[3]])
+    # ----------------- IP Forwarding Logs -----------------
+    for ipf in cis_results.get("ip_forwarding", []):
+        # Check if this is an instance result or an error string
+        if isinstance(ipf, list) and len(ipf) == 3:
+            ip_forwarding.append(["Compute Instance", ipf[0], "canIpForward: " + str(ipf[1]), ipf[2]])
+        else:
+            # Error message
+            ip_forwarding.append(["Compute Instance", str(ipf), "", "ERROR"])
+
+    # ----------------- Create Excel -----------------
     excel_path = create_excel_report(
-        project, vm_data, sql_data, gke_data, owner_data,
-        bucket_data, firewall_data, vpc_flow_data, nat_data,
-        lb_data, ip_forward_data
+        project,
+        vm_data, sql_data, gke_data, owner_data, bucket_data,
+        networking_data, logging_data, org_data,
+        lb_data, ip_forwarding
     )
 
-    status = send_audit_email(project, excel_path, "pradeepsinghania906@gmail.com")
+    # ----------------- Send Email -----------------
+    status = send_audit_email(project, excel_path, "hruthika.sa258@gmail.com")
 
-    # ----------------- HTML UI -----------------
+    # --- Build HTML dashboard ---
     html = f"""
     <html>
     <head>
-        <title>GCP Security Audit Dashboard</title>
+        <title>🔒 GCP Security Audit Dashboard</title>
         <script src="https://cdn.tailwindcss.com"></script>
-        <style>
-            th, td {{
-                padding: 8px 10px;
-                text-align: left;
-                border-bottom: 1px solid #e5e7eb;
-            }}
-            table {{
-                width: 100%;
-                border-collapse: collapse;
-                margin-top: 0.5rem;
-            }}
-            thead {{
-                background-color: #f1f5f9;
-                color: #1e3a8a;
-                font-weight: 600;
-            }}
-            .print-btn {{
-                background-color: #2563eb;
-                color: white;
-                padding: 8px 16px;
-                border-radius: 6px;
-                font-size: 14px;
-                margin-bottom: 10px;
-            }}
-            .print-btn:hover {{
-                background-color: #1d4ed8;
-            }}
-        </style>
     </head>
     <body class="bg-gray-50 text-gray-900">
-        <div class="max-w-7xl mx-auto mt-10 p-6 bg-white shadow-lg rounded-lg">
-            <div class="flex justify-between items-center mb-4">
-                <h1 class="text-3xl font-bold text-blue-700">GCP Security Audit Dashboard</h1>
-                <button class="print-btn" onclick="window.print()">Print Report</button>
-            </div>
-            <p class="text-gray-600 mb-6">
-                Project: <b>{project}</b> | Time: {datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")}
+        <div class="max-w-5xl mx-auto mt-10 p-6 bg-white shadow-lg rounded-lg">
+            <h1 class="text-3xl font-bold text-center text-blue-700 mb-4">
+                🔒 GCP Security Audit Dashboard
+            </h1>
+            <p class="text-center text-gray-600 mb-6">
+                Project: {project} | Time: {datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")}
             </p>
     """
 
-    # ----------------- Display Sections -----------------
     sections = [
-        ("Compute Engine", vm_data, ["Instance Name", "Zone", "External IP"]),
-        ("Cloud SQL", sql_data, ["Instance Name", "Public IP"]),
-        ("GKE Clusters", gke_data, ["Cluster Name", "Endpoint"]),
-        ("IAM Owners", owner_data, ["Account", "Role"]),
-        ("Buckets", bucket_data, ["Bucket Name", "Access Level", "Entity"]),
-        ("Load Balancers", lb_data, ["LB Name", "Scheme", "IP", "Target", "SSL Policy", "Cloud Armor"]),
-        ("Firewall Rules", firewall_data, ["Rule Name", "Port/Protocol", "Source Ranges", "Status", "Reason"]),
-        ("VPC Flow Logs", vpc_flow_data, ["Subnet", "Region", "Flow Enabled", "Sample Rate", "Status", "Reason"]),
-        ("Cloud NAT Logs", nat_data, ["NAT Name", "Router", "Logging Enabled", "Status", "Reason"]),
-        ("IP Forwarding", ip_forward_data, ["Instance", "Can IP Forward", "Status", "Reason"]),
+        ("Compute Engine", vm_data),
+        ("Cloud SQL", sql_data),
+        ("GKE Clusters", gke_data),
+        ("IAM Owners", owner_data),
+        ("Buckets", bucket_data),
+        ("LB", lb_data),
+        ("org_data",org_data),
+        ("logging_data",logging_data),
+        ("networking_data",networking_data),
+        ("ip_forwarding",ip_forwarding)
     ]
 
-    # ----------------- Build Tables -----------------
-    for category, data, headers in sections:
+    for category, data in sections:
         html += f"""
-        <div class='border border-gray-200 rounded-lg p-4 mb-6'>
+        <div class='border border-gray-200 rounded-lg p-4 mb-4'>
             <h2 class='text-xl font-semibold text-blue-600 mb-2'>{category}</h2>
         """
         if data:
-            html += "<div class='overflow-x-auto'><table class='min-w-full text-sm text-gray-800'><thead><tr>"
-            for h in headers:
-                html += f"<th>{h}</th>"
-            html += "<th>Recommendation</th></tr></thead><tbody>"
-
+            html += "<ul class='list-disc pl-6 text-gray-700'>"
             for row in data:
-                html += "<tr class='hover:bg-gray-50'>"
-                for cell in row:
-                    html += f"<td>{str(cell)}</td>"
-                rec = get_recommendation(category, row)
-                html += f"<td>{rec}</td></tr>"
-            html += "</tbody></table></div>"
+                html += f"<li>{' | '.join(map(str, row))}</li>"
+            html += "</ul>"
         else:
-            html += "<p class='text-green-600 font-medium'>✅ No issues found.</p>"
+            html += "<p class='text-green-600'>✅ No issues found.</p>"
         html += "</div>"
 
     html += f"""
-        <p class="text-center text-green-700 font-semibold mt-6">{status}</p>
+        <p class="text-center text-green-700 font-semibold mt-6">
+            ✅ {status}
+        </p>
         </div>
     </body>
     </html>

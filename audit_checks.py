@@ -75,11 +75,14 @@ def check_public_buckets():
     return bucket_data
 
 
-def check_load_balancers():
+from googleapiclient import discovery
+from google.auth import default
+
+def check_load_balancers_audit():
+    creds, project = default()
     compute = discovery.build('compute', 'v1', credentials=creds)
     lb_data = []
 
-    # Fetch all forwarding rules
     req = compute.forwardingRules().aggregatedList(project=project)
     while req is not None:
         res = req.execute()
@@ -87,41 +90,106 @@ def check_load_balancers():
             for rule in scoped_list.get('forwardingRules', []):
                 lb_name = rule.get('name', '')
                 target = rule.get('target', '') or rule.get('backendService', '') or rule.get('targetPool', '')
-                
-                # Initialize TLS and Cloud Armor defaults
+                scheme = rule.get('loadBalancingScheme', '')
+                ip = rule.get('IPAddress', '')
+
+                # Default values
                 ssl_policy = 'N/A'
                 cloud_armor_policy = 'N/A'
+                ssl_cert_status = 'N/A'
+                https_redirect = 'N/A'
+                armor_rule_strength = 'N/A'
+                internal_exposure = 'N/A'
 
-                # Check if target is HTTPS proxy to get SSL/TLS policy
+                # ---------------- HTTPS Proxy ----------------
                 if 'targetHttpsProxies' in target or target.endswith('httpsProxies'):
                     try:
                         target_name = target.split('/')[-1]
                         proxy = compute.targetHttpsProxies().get(project=project, targetHttpsProxy=target_name).execute()
+
                         ssl_policy = proxy.get('sslPolicy', 'None')
                         cloud_armor_policy = proxy.get('securityPolicy', 'None')
-                    except Exception:
-                        ssl_policy = 'Error'
-                        cloud_armor_policy = 'Error'
 
-                # Check if target is HTTP proxy to get Cloud Armor
+                        # 1️⃣ SSL Certificate Check
+                        cert_urls = proxy.get('sslCertificates', [])
+                        if cert_urls:
+                            ssl_cert_status = []
+                            for cert_url in cert_urls:
+                                cert_name = cert_url.split('/')[-1]
+                                cert = compute.sslCertificates().get(project=project, sslCertificate=cert_name).execute()
+                                exp = cert.get('expireTime', 'Unknown')
+                                ssl_cert_status.append(f"Valid till: {exp}")
+                            ssl_cert_status = ', '.join(ssl_cert_status)
+                        else:
+                            ssl_cert_status = 'No SSL Certificates attached'
+
+                        # 3️⃣ Cloud Armor Rule Strength
+                        if cloud_armor_policy not in ['None', 'N/A']:
+                            armor_name = cloud_armor_policy.split('/')[-1]
+                            policy = compute.securityPolicies().get(project=project, securityPolicy=armor_name).execute()
+                            rules = policy.get('rules', [])
+                            if not rules:
+                                armor_rule_strength = 'Weak - No rules found'
+                            else:
+                                armor_rule_strength = f"Strong - {len(rules)} rules"
+                        else:
+                            armor_rule_strength = 'No Cloud Armor policy'
+
+                    except Exception as e:
+                        ssl_cert_status = f"Error: {str(e)}"
+
+                # ---------------- HTTP Proxy ----------------
                 elif 'targetHttpProxies' in target or target.endswith('httpProxies'):
                     try:
                         target_name = target.split('/')[-1]
                         proxy = compute.targetHttpProxies().get(project=project, targetHttpProxy=target_name).execute()
                         cloud_armor_policy = proxy.get('securityPolicy', 'None')
-                    except Exception:
-                        cloud_armor_policy = 'Error'
+
+                        # 2️⃣ Check if HTTP is redirected to HTTPS
+                        # Usually via URL maps that contain redirect actions
+                        url_map_url = proxy.get('urlMap', '')
+                        if url_map_url:
+                            url_map_name = url_map_url.split('/')[-1]
+                            url_map = compute.urlMaps().get(project=project, urlMap=url_map_name).execute()
+                            has_redirect = any('redirectAction' in path_matcher.get('defaultRouteAction', {})
+                                               for path_matcher in url_map.get('pathMatchers', []))
+                            https_redirect = 'Yes' if has_redirect else 'No'
+                        else:
+                            https_redirect = 'No URL map found'
+
+                        # Cloud Armor policy check (similar to HTTPS)
+                        if cloud_armor_policy not in ['None', 'N/A']:
+                            armor_name = cloud_armor_policy.split('/')[-1]
+                            policy = compute.securityPolicies().get(project=project, securityPolicy=armor_name).execute()
+                            rules = policy.get('rules', [])
+                            armor_rule_strength = f"Strong - {len(rules)} rules" if rules else "Weak - No rules"
+                        else:
+                            armor_rule_strength = 'No Cloud Armor policy'
+
+                    except Exception as e:
+                        https_redirect = f"Error: {str(e)}"
+
+                # ---------------- External Exposure Check ----------------
+                if scheme == 'EXTERNAL':
+                    # Check if backend is an internal resource (like internal backend service or instance group)
+                    internal_exposure = 'Potential Risk' if any(x in target for x in ['backendServices', 'instanceGroups']) else 'OK'
 
                 lb_data.append({
                     'name': lb_name,
-                    'scheme': rule.get('loadBalancingScheme', ''),
-                    'ip': rule.get('IPAddress', ''),
+                    'scheme': scheme,
+                    'ip': ip,
                     'target': target,
                     'ssl_policy': ssl_policy,
-                    'cloud_armor_policy': cloud_armor_policy
+                    'ssl_cert_status': ssl_cert_status,
+                    'https_redirect': https_redirect,
+                    'cloud_armor_policy': cloud_armor_policy,
+                    'armor_rule_strength': armor_rule_strength,
+                    'internal_exposure': internal_exposure
                 })
+
         req = compute.forwardingRules().aggregatedList_next(req, res)
     return lb_data
+
 
 
 # ----------------- Firewall Rules Check -----------------
@@ -166,5 +234,6 @@ def check_firewall_rules():
         firewall_data.append([f"Error fetching firewall rules: {str(e)}"])
 
     return firewall_data
+
 
 

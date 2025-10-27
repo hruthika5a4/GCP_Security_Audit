@@ -257,7 +257,12 @@ def check_cloud_functions_and_run():
             region = fn.get('name', '').split('/')[3] if len(fn.get('name', '').split('/')) > 3 else 'global'
             runtime = fn.get('runtime', 'N/A')
             trigger_type = 'HTTP' if 'httpsTrigger' in fn else 'Event'
+
+            # ✅ Use correct public URL for GCF HTTP invocation
             url = fn.get('httpsTrigger', {}).get('url', 'N/A')
+            if url == 'N/A' or 'run.app' in url:
+                url = f"https://{region}-{project}.cloudfunctions.net/{name}"
+
             ingress = fn.get('ingressSettings', 'N/A')
             auth = fn.get('httpsTrigger', {}).get('securityLevel', 'N/A')
             service_account = fn.get('serviceAccountEmail', 'N/A')
@@ -338,6 +343,8 @@ def check_cloud_functions_and_run():
                 'Low'
             )
 
+            recommendation = "Restrict unauthenticated invocations and use ingress controls for internal-only access."
+
             audit_data.append([
                 "Cloud Run",
                 name,
@@ -349,7 +356,8 @@ def check_cloud_functions_and_run():
                 auth_level,
                 service_account,
                 "Yes" if unauthenticated else "No",
-                exposure_risk
+                exposure_risk,
+                recommendation
             ])
     except Exception as e:
         audit_data.append([
@@ -360,4 +368,6 @@ def check_cloud_functions_and_run():
         ])
 
     return audit_data
+
+
 

@@ -236,6 +236,9 @@ def check_firewall_rules():
 
 # --------------------------------- cloud_function_and_run ---------------------------------------------------
 def check_cloud_functions_and_run():
+    from googleapiclient import discovery
+    from google.auth import default
+
     creds, project = default()
     functions_service = discovery.build('cloudfunctions', 'v1', credentials=creds)
     run_service = discovery.build('run', 'v1', credentials=creds)
@@ -259,10 +262,7 @@ def check_cloud_functions_and_run():
             auth = fn.get('httpsTrigger', {}).get('securityLevel', 'N/A')
             service_account = fn.get('serviceAccountEmail', 'N/A')
 
-            # Security checks
-            unauthenticated = (
-                'Yes' if fn.get('httpsTrigger', {}).get('securityLevel') == 'SECURE_OPTIONAL' else 'No'
-            )
+            unauthenticated = 'Yes' if auth == 'SECURE_OPTIONAL' else 'No'
             exposure_risk = (
                 'High' if ingress == 'ALLOW_ALL' or unauthenticated == 'Yes'
                 else 'Medium' if ingress == 'ALLOW_INTERNAL_AND_GCLB'
@@ -304,15 +304,17 @@ def check_cloud_functions_and_run():
 
         for service in res.get('items', []):
             metadata = service.get('metadata', {})
+            spec = service.get('spec', {})
+            template_spec = spec.get('template', {}).get('spec', {})
+
             name = metadata.get('name', 'N/A')
-            region = metadata.get('namespace', 'N/A')  # Corrected: namespace ≠ region; we’ll fix below
-            # Try to derive region from location label if available
-            region = metadata.get('labels', {}).get('cloud.googleapis.com/location', region)
+            region = metadata.get('labels', {}).get('cloud.googleapis.com/location', 'global')
             url = service.get('status', {}).get('url', 'N/A')
             annotations = metadata.get('annotations', {})
             ingress = annotations.get('run.googleapis.com/ingress', 'N/A')
+            service_account = template_spec.get('serviceAccountName', 'N/A')
 
-            # IAM Policy check
+            # IAM Policy check for auth
             try:
                 resource_name = metadata.get('selfLink', '').replace(
                     'https://run.googleapis.com/', ''
@@ -322,10 +324,16 @@ def check_cloud_functions_and_run():
                 ).execute()
                 members = [m for b in policy.get('bindings', []) for m in b.get('members', [])]
                 unauthenticated = any('allUsers' in m or 'allAuthenticatedUsers' in m for m in members)
+                auth_level = "Unauthenticated" if unauthenticated else "Authenticated"
             except Exception:
                 unauthenticated = False
+                auth_level = "Unknown"
 
-            exposure_risk = 'High' if ingress == 'all' or unauthenticated else 'Low'
+            exposure_risk = (
+                'High' if ingress == 'all' or unauthenticated else
+                'Medium' if ingress == 'internal-and-cloud-load-balancing' else
+                'Low'
+            )
 
             recommendation = (
                 "Restrict unauthenticated invocations and use ingress controls for internal-only access."
@@ -339,8 +347,8 @@ def check_cloud_functions_and_run():
                 "HTTP",
                 url,
                 ingress,
-                "N/A",
-                "N/A",
+                auth_level,
+                service_account,
                 "Yes" if unauthenticated else "No",
                 exposure_risk,
                 recommendation
@@ -354,3 +362,5 @@ def check_cloud_functions_and_run():
         ])
 
     return audit_data
+
+

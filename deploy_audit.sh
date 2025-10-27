@@ -38,8 +38,6 @@ if [[ -f requirements.txt ]]; then
   pip install -r requirements.txt -t lib/
 fi
 
-# Delete existing function first (if needed)
-gcloud functions delete "$FUNCTION_NAME" --region="$REGION" --quiet
 
 # Deploy with explicit name and entry point
 gcloud functions deploy "$FUNCTION_NAME" \

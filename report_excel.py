@@ -28,7 +28,8 @@ def create_excel_report(
     owner_data,
     bucket_data,
     fw_data,
-    lb_data=None
+    lb_data=None,
+    cf_data=None  # ✅ Cloud Functions & Cloud Run data
 ):
     """Generate a detailed security audit Excel report."""
     wb = Workbook()
@@ -46,7 +47,8 @@ def create_excel_report(
         "Owners",
         "Buckets",
         "Firewall Rules",
-        "Load Balancers"
+        "Load Balancers",
+        "Cloud Functions / Cloud Run"
     ]
     summary.append(summary_headers)
     summary.append([
@@ -58,7 +60,8 @@ def create_excel_report(
         len(owner_data),
         len(bucket_data),
         len(fw_data),
-        len(lb_data) if lb_data else 0
+        len(lb_data) if lb_data else 0,
+        len(cf_data) if cf_data else 0
     ])
 
     for cell in summary[1]:
@@ -83,14 +86,17 @@ def create_excel_report(
         # Data rows
         if data:
             for row in data:
-                safe_row = []
-                for v in row:
-                    if isinstance(v, list):
-                        safe_row.append(", ".join(map(str, v)))
-                    elif isinstance(v, dict):
-                        safe_row.append(str(v))
-                    else:
-                        safe_row.append(v)
+                if isinstance(row, dict):
+                    safe_row = [row.get(h.lower().replace(" ", "_"), "") for h in headers]
+                else:
+                    safe_row = []
+                    for v in row:
+                        if isinstance(v, list):
+                            safe_row.append(", ".join(map(str, v)))
+                        elif isinstance(v, dict):
+                            safe_row.append(str(v))
+                        else:
+                            safe_row.append(v)
                 ws.append(safe_row)
         else:
             ws.append(["✅ No issues found."])
@@ -118,22 +124,35 @@ def create_excel_report(
     add_sheet("FirewallRules", fw_headers, fw_data)
 
     # ----------------- Load Balancers -----------------
-    # ----------------- Load Balancers -----------------
     if lb_data:
         lb_headers = [
-            "LB Name",
+            "Name",
             "Scheme",
             "IP",
+            "Target",
             "SSL Policy",
+            "SSL Cert Status",
+            "HTTPS Redirect",
             "Cloud Armor Policy",
-            "Valid SSL Certificate",
-            "HTTP to HTTPS Redirect",
-            "Cloud Armor Strength",
-            "External Exposure",
-            "Overall Recommendation"
+            "Armor Rule Strength",
+            "Internal Exposure"
         ]
         add_sheet("LoadBalancers", lb_headers, lb_data)
 
+    # ----------------- Cloud Functions & Cloud Run -----------------
+    if cf_data:
+        cf_headers = [
+            "Service Type",
+            "Name",
+            "Region",
+            "Ingress",
+            "Authentication",
+            "Service Account",
+            "VPC Connector",
+            "Allow Internal Only",
+            "Public Exposure"
+        ]
+        add_sheet("CloudFunctions_Run", cf_headers, cf_data)
 
     # ----------------- Save Workbook -----------------
     path = f"/tmp/{project}_security_audit.xlsx"

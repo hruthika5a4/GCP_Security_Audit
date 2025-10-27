@@ -118,26 +118,26 @@ def create_excel_report(
     add_sheet("FirewallRules", fw_headers, fw_data)
 
     # ----------------- Load Balancers -----------------
+    # ----------------- Load Balancers -----------------
     if lb_data:
         lb_headers = [
             "LB Name",
-            "Scope",
-            "LB Type",
-            "Target Type",
+            "Scheme",
             "IP",
-            "Protocol",
-            "Port Range",
+            "Target",
             "SSL Policy",
-            "SSL Profile",
-            "Min TLS",
-            "SSL Recommendation",
-            "TLS Recommendation",
-            "Backend Services (Logging / Cloud Run)",
-            "Recommendation"
+            "Cloud Armor Policy",
+            "Valid SSL Certificate",
+            "HTTP to HTTPS Redirect",
+            "Cloud Armor Strength",
+            "External Exposure",
+            "Overall Recommendation"
         ]
         add_sheet("LoadBalancers", lb_headers, lb_data)
+
 
     # ----------------- Save Workbook -----------------
     path = f"/tmp/{project}_security_audit.xlsx"
     wb.save(path)
     return path
+

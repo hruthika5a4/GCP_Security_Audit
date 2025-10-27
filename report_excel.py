@@ -27,10 +27,10 @@ def create_excel_report(project, vm_data, sql_data, gke_data, owner_data, bucket
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     # Summary sheet
-    summary.append(["Project ID", "Audit Time", "VMs", "SQL", "GKE", "Owners", "Buckets", "Load Balancers", "IP Forwarding Issues"])
+    summary.append(["Project ID", "Audit Time", "VMs", "SQL", "GKE", "Owners", "Buckets", "Load Balancers"])
     summary.append([
         project, now, len(vm_data), len(sql_data), len(gke_data), len(owner_data), 
-        len(bucket_data), len(lb_data) if lb_data else 0, len(ip_forwarding) if ip_forwarding else 0
+        len(bucket_data), len(lb_data) if lb_data else 0
     ])
 
     for cell in summary[1]:
@@ -48,27 +48,7 @@ def create_excel_report(project, vm_data, sql_data, gke_data, owner_data, bucket
             c.alignment = Alignment(horizontal="center", vertical="center")
         if data:
             for d in data:
-                # If d is dict (like lb_data), flatten it
-                if isinstance(d, dict):
-                    row = [
-                        d.get('name'),
-                        d.get('scope'),
-                        d.get('lb_type'),
-                        d.get('target_type'),
-                        d.get('ip'),
-                        d.get('ip_protocol'),
-                        d.get('port_range'),
-                        d.get('ssl_policy'),
-                        d.get('ssl_profile'),
-                        d.get('ssl_min_tls'),
-                        d.get('ssl_recommendation'),
-                        d.get('tls_recommendation'),
-                        "; ".join([f"{b['backend_service']} (logging: {b.get('logging_enabled')}, CloudRun: {b.get('cloud_run_service','-')})" for b in d.get('backend_services', [])]),
-                        d.get('recommendation')
-                    ]
-                    ws.append(row)
-                else:
-                    ws.append(d)
+                ws.append(d)
         else:
             ws.append(["✅ No issues found."])
         ws.freeze_panes = "A2"
@@ -81,9 +61,8 @@ def create_excel_report(project, vm_data, sql_data, gke_data, owner_data, bucket
     add_sheet("GKE", ["Cluster", "Endpoint", "Private Nodes"], gke_data)
     add_sheet("Owners", ["Member", "Role"], owner_data)
     add_sheet("Buckets", ["Bucket", "Role", "Member"], bucket_data)
-    add_sheet("Networking", ["Resource", "Issue", "Region", "Severity"], networking_data)
-    add_sheet("Logging", ["Feature", "Status"], logging_data)
-    add_sheet("OrgPolicy", ["Policy", "Status"], org_data)
+
+
 
     # Add Load Balancers sheet
     if lb_data:
@@ -94,12 +73,8 @@ def create_excel_report(project, vm_data, sql_data, gke_data, owner_data, bucket
         ]
         add_sheet("LoadBalancers", lb_headers, lb_data)
 
-    # Add IP Forwarding sheet
-    if ip_forwarding:
-        ip_headers = ["Compute Instance", "canIpForward", "Status"]
-        add_sheet("IPForwarding", ip_headers, ip_forwarding)
-
 
     path = f"/tmp/{project}_security_audit.xlsx"
     wb.save(path)
     return path
+

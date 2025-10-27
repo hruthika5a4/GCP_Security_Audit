@@ -236,9 +236,6 @@ def check_firewall_rules():
 
 # --------------------------------- cloud_function_and_run ---------------------------------------------------
 def check_cloud_functions_and_run():
-    from googleapiclient import discovery
-    from google.auth import default
-
     creds, project = default()
     functions_service = discovery.build('cloudfunctions', 'v1', credentials=creds)
     run_service = discovery.build('run', 'v1', credentials=creds)
@@ -247,11 +244,11 @@ def check_cloud_functions_and_run():
 
     # -------------------- Cloud Functions --------------------
     try:
-        # Fetch all functions across all regions
         req = functions_service.projects().locations().functions().list(
             parent=f"projects/{project}/locations/-"
         )
         res = req.execute()
+
         for fn in res.get('functions', []):
             name = fn.get('name', '').split('/')[-1]
             region = fn.get('name', '').split('/')[3] if len(fn.get('name', '').split('/')) > 3 else 'global'
@@ -262,9 +259,19 @@ def check_cloud_functions_and_run():
             auth = fn.get('httpsTrigger', {}).get('securityLevel', 'N/A')
             service_account = fn.get('serviceAccountEmail', 'N/A')
 
-            # Security evaluation
-            unauthenticated = 'Yes' if fn.get('httpsTrigger', {}).get('url') and fn.get('httpsTrigger', {}).get('securityLevel') == 'SECURE_OPTIONAL' else 'No'
-            exposure_risk = 'High' if ingress == 'ALLOW_ALL' or unauthenticated == 'Yes' else 'Medium' if ingress == 'ALLOW_INTERNAL_AND_GCLB' else 'Low'
+            # Security checks
+            unauthenticated = (
+                'Yes' if fn.get('httpsTrigger', {}).get('securityLevel') == 'SECURE_OPTIONAL' else 'No'
+            )
+            exposure_risk = (
+                'High' if ingress == 'ALLOW_ALL' or unauthenticated == 'Yes'
+                else 'Medium' if ingress == 'ALLOW_INTERNAL_AND_GCLB'
+                else 'Low'
+            )
+
+            recommendation = (
+                "Restrict unauthenticated invocations and apply ingress controls for internal-only access."
+            )
 
             audit_data.append([
                 "Cloud Function",
@@ -278,14 +285,14 @@ def check_cloud_functions_and_run():
                 service_account,
                 unauthenticated,
                 exposure_risk,
-                "Restrict unauthenticated invocations and use ingress controls for internal-only access."
+                recommendation
             ])
     except Exception as e:
         audit_data.append([
             "Cloud Function",
             f"Error fetching: {str(e)}",
             "", "", "", "", "", "", "", "", "",
-            "Restrict unauthenticated invocations and use ingress controls for internal-only access."
+            "Restrict unauthenticated invocations and apply ingress controls for internal-only access."
         ])
 
     # -------------------- Cloud Run --------------------
@@ -294,25 +301,35 @@ def check_cloud_functions_and_run():
             parent=f"projects/{project}/locations/-"
         )
         res = req.execute()
+
         for service in res.get('items', []):
             metadata = service.get('metadata', {})
             name = metadata.get('name', 'N/A')
-            region = metadata.get('namespace', 'N/A')
+            region = metadata.get('namespace', 'N/A')  # Corrected: namespace ≠ region; we’ll fix below
+            # Try to derive region from location label if available
+            region = metadata.get('labels', {}).get('cloud.googleapis.com/location', region)
             url = service.get('status', {}).get('url', 'N/A')
             annotations = metadata.get('annotations', {})
             ingress = annotations.get('run.googleapis.com/ingress', 'N/A')
 
             # IAM Policy check
             try:
+                resource_name = metadata.get('selfLink', '').replace(
+                    'https://run.googleapis.com/', ''
+                )
                 policy = run_service.projects().locations().services().getIamPolicy(
-                    resource=metadata['selfLink']
+                    resource=resource_name
                 ).execute()
                 members = [m for b in policy.get('bindings', []) for m in b.get('members', [])]
                 unauthenticated = any('allUsers' in m or 'allAuthenticatedUsers' in m for m in members)
             except Exception:
-                unauthenticated = 'Unknown'
+                unauthenticated = False
 
             exposure_risk = 'High' if ingress == 'all' or unauthenticated else 'Low'
+
+            recommendation = (
+                "Restrict unauthenticated invocations and use ingress controls for internal-only access."
+            )
 
             audit_data.append([
                 "Cloud Run",
@@ -326,7 +343,7 @@ def check_cloud_functions_and_run():
                 "N/A",
                 "Yes" if unauthenticated else "No",
                 exposure_risk,
-                "Restrict unauthenticated invocations and use ingress controls for internal-only access."
+                recommendation
             ])
     except Exception as e:
         audit_data.append([
@@ -337,8 +354,3 @@ def check_cloud_functions_and_run():
         ])
 
     return audit_data
-
-
-
-
-

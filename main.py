@@ -113,11 +113,11 @@ def security_audit(request):
         ("Compute Engine", vm_data, ["Instance Name", "Zone", "External IP"]),
         ("Cloud SQL", sql_data, ["Instance Name", "Public IP"]),
         ("GKE Clusters", gke_data, ["Cluster Name", "Endpoint"]),
-        ("IAM Owners", owner_data, ["Account", "Role"]),
+        ("Service Accounts with Owner Role", owner_data, ["Account", "Role"]),
         ("Buckets", bucket_data, ["Bucket Name", "Access Level", "Entity"]),
         ("Firewall Rules", fw_data, ["Rule Name", "Direction", "Protocols", "Source Ranges", "Network", "Priority", "Disabled"]),
         ("Load Balancers", lb_data, [
-            "LB Name", "Scheme", "IP", "Target", "SSL Policy",
+            "LB Name", "Scheme", "IP", "SSL Policy",
             "SSL Cert Status", "HTTPS Redirect", "Cloud Armor Policy",
             "Armor Rule Strength", "Internal Exposure"
         ]),
@@ -139,7 +139,7 @@ def security_audit(request):
                 html += "<tr class='hover:bg-gray-50'>"
                 # handle both dicts and lists
                 if isinstance(row, dict):
-                    for key in ["name", "scheme", "ip", "target", "ssl_policy",
+                    for key in ["name", "scheme", "ip", "ssl_policy",
                                 "ssl_cert_status", "https_redirect", "cloud_armor_policy",
                                 "armor_rule_strength", "internal_exposure"]:
                         html += f"<td>{row.get(key, '')}</td>"

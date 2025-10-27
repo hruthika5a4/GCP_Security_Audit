@@ -40,7 +40,7 @@ fi
 
 # --- Step 4: Deploy Function ---
 echo "🚀 Deploying Cloud Function..."
-gcloud functions deploy security_audit_1234 \
+gcloud functions deploy security_audit_1234098 \
   --runtime python312 \
   --trigger-http \
   --allow-unauthenticated \

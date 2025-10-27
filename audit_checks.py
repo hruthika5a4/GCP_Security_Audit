@@ -234,8 +234,11 @@ def check_firewall_rules():
 
     return firewall_data
 
----------------------------------clould_function_and_run ---------------------------------------------------
+# --------------------------------- cloud_function_and_run ---------------------------------------------------
 def check_cloud_functions_and_run():
+    from googleapiclient import discovery
+    from google.auth import default
+
     creds, project = default()
     functions_service = discovery.build('cloudfunctions', 'v1', credentials=creds)
     run_service = discovery.build('run', 'v1', credentials=creds)
@@ -244,45 +247,46 @@ def check_cloud_functions_and_run():
 
     # -------------------- Cloud Functions --------------------
     try:
-        func_req = functions_service.projects().locations().list(
-            name=f"projects/{project}/locations/-"
+        # Fetch all functions across all regions
+        req = functions_service.projects().locations().functions().list(
+            parent=f"projects/{project}/locations/-"
         )
-        func_res = func_req.execute()
-        for loc in func_res.get('locations', []):
-            region = loc['locationId']
-            req = functions_service.projects().locations().functions().list(
-                parent=f"projects/{project}/locations/{region}"
-            )
-            res = req.execute()
-            for fn in res.get('functions', []):
-                name = fn.get('name', '').split('/')[-1]
-                entry_point = fn.get('entryPoint', 'N/A')
-                runtime = fn.get('runtime', 'N/A')
-                trigger_type = 'HTTP' if 'httpsTrigger' in fn else 'Event'
-                url = fn.get('httpsTrigger', {}).get('url', 'N/A')
-                ingress = fn.get('ingressSettings', 'N/A')
-                auth = fn.get('httpsTrigger', {}).get('securityLevel', 'N/A')
-                service_account = fn.get('serviceAccountEmail', 'N/A')
+        res = req.execute()
+        for fn in res.get('functions', []):
+            name = fn.get('name', '').split('/')[-1]
+            region = fn.get('name', '').split('/')[3] if len(fn.get('name', '').split('/')) > 3 else 'global'
+            runtime = fn.get('runtime', 'N/A')
+            trigger_type = 'HTTP' if 'httpsTrigger' in fn else 'Event'
+            url = fn.get('httpsTrigger', {}).get('url', 'N/A')
+            ingress = fn.get('ingressSettings', 'N/A')
+            auth = fn.get('httpsTrigger', {}).get('securityLevel', 'N/A')
+            service_account = fn.get('serviceAccountEmail', 'N/A')
 
-                # Security findings
-                unauthenticated = 'Yes' if 'httpsTrigger' in fn and fn['httpsTrigger'].get('url') and 'allowUnauthenticated' in fn.get('labels', {}) else 'Unknown'
-                exposure_risk = 'High' if ingress == 'ALLOW_ALL' else 'Medium' if ingress == 'ALLOW_INTERNAL_AND_GCLB' else 'Low'
+            # Security evaluation
+            unauthenticated = 'Yes' if fn.get('httpsTrigger', {}).get('url') and fn.get('httpsTrigger', {}).get('securityLevel') == 'SECURE_OPTIONAL' else 'No'
+            exposure_risk = 'High' if ingress == 'ALLOW_ALL' or unauthenticated == 'Yes' else 'Medium' if ingress == 'ALLOW_INTERNAL_AND_GCLB' else 'Low'
 
-                audit_data.append([
-                    "Cloud Function",
-                    name,
-                    region,
-                    runtime,
-                    trigger_type,
-                    url,
-                    ingress,
-                    auth,
-                    service_account,
-                    unauthenticated,
-                    exposure_risk
-                ])
+            audit_data.append([
+                "Cloud Function",
+                name,
+                region,
+                runtime,
+                trigger_type,
+                url,
+                ingress,
+                auth,
+                service_account,
+                unauthenticated,
+                exposure_risk,
+                "Restrict unauthenticated invocations and use ingress controls for internal-only access."
+            ])
     except Exception as e:
-        audit_data.append(["Cloud Function", f"Error fetching: {str(e)}"])
+        audit_data.append([
+            "Cloud Function",
+            f"Error fetching: {str(e)}",
+            "", "", "", "", "", "", "", "", "",
+            "Restrict unauthenticated invocations and use ingress controls for internal-only access."
+        ])
 
     # -------------------- Cloud Run --------------------
     try:
@@ -291,17 +295,17 @@ def check_cloud_functions_and_run():
         )
         res = req.execute()
         for service in res.get('items', []):
-            name = service.get('metadata', {}).get('name', '')
-            region = service.get('metadata', {}).get('namespace', '')
+            metadata = service.get('metadata', {})
+            name = metadata.get('name', 'N/A')
+            region = metadata.get('namespace', 'N/A')
             url = service.get('status', {}).get('url', 'N/A')
-            annotations = service.get('metadata', {}).get('annotations', {})
+            annotations = metadata.get('annotations', {})
             ingress = annotations.get('run.googleapis.com/ingress', 'N/A')
-            launch_stage = service.get('metadata', {}).get('labels', {}).get('run.googleapis.com/launch-stage', 'N/A')
 
             # IAM Policy check
             try:
                 policy = run_service.projects().locations().services().getIamPolicy(
-                    resource=service['metadata']['selfLink']
+                    resource=metadata['selfLink']
                 ).execute()
                 members = [m for b in policy.get('bindings', []) for m in b.get('members', [])]
                 unauthenticated = any('allUsers' in m or 'allAuthenticatedUsers' in m for m in members)
@@ -321,12 +325,19 @@ def check_cloud_functions_and_run():
                 "N/A",
                 "N/A",
                 "Yes" if unauthenticated else "No",
-                exposure_risk
+                exposure_risk,
+                "Restrict unauthenticated invocations and use ingress controls for internal-only access."
             ])
     except Exception as e:
-        audit_data.append(["Cloud Run", f"Error fetching: {str(e)}"])
+        audit_data.append([
+            "Cloud Run",
+            f"Error fetching: {str(e)}",
+            "", "", "", "", "", "", "", "", "",
+            "Restrict unauthenticated invocations and use ingress controls for internal-only access."
+        ])
 
     return audit_data
+
 
 
 

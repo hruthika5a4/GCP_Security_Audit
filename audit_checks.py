@@ -234,7 +234,7 @@ def check_firewall_rules():
 
     return firewall_data
 
-# --------------------------------- cloud_function_and_run ---------------------------------------------------
+# --------------------------------- check_cloud_functions_and_run ---------------------------------------------------
 def check_cloud_functions_and_run():
     from googleapiclient import discovery
     from google.auth import default
@@ -269,9 +269,7 @@ def check_cloud_functions_and_run():
                 else 'Low'
             )
 
-            recommendation = (
-                "Restrict unauthenticated invocations and apply ingress controls for internal-only access."
-            )
+            recommendation = "Restrict unauthenticated invocations and apply ingress controls for internal-only access."
 
             audit_data.append([
                 "Cloud Function",
@@ -316,15 +314,20 @@ def check_cloud_functions_and_run():
 
             # IAM Policy check for auth
             try:
-                resource_name = metadata.get('selfLink', '').replace(
-                    'https://run.googleapis.com/', ''
-                )
+                resource_name = f"projects/{project}/locations/{region}/services/{name}"
                 policy = run_service.projects().locations().services().getIamPolicy(
                     resource=resource_name
                 ).execute()
+
                 members = [m for b in policy.get('bindings', []) for m in b.get('members', [])]
-                unauthenticated = any('allUsers' in m or 'allAuthenticatedUsers' in m for m in members)
-                auth_level = "Unauthenticated" if unauthenticated else "Authenticated"
+                unauthenticated = any('allUsers' in m for m in members)
+                authenticated = any('allAuthenticatedUsers' in m for m in members)
+
+                auth_level = (
+                    "Unauthenticated" if unauthenticated else
+                    "Authenticated (All Authenticated Users)" if authenticated else
+                    "Authenticated (Restricted)"
+                )
             except Exception:
                 unauthenticated = False
                 auth_level = "Unknown"
@@ -335,9 +338,7 @@ def check_cloud_functions_and_run():
                 'Low'
             )
 
-            recommendation = (
-                "Restrict unauthenticated invocations and use ingress controls for internal-only access."
-            )
+            recommendation = "Restrict unauthenticated invocations and use ingress controls for internal-only access."
 
             audit_data.append([
                 "Cloud Run",
@@ -362,5 +363,3 @@ def check_cloud_functions_and_run():
         ])
 
     return audit_data
-
-

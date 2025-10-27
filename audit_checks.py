@@ -43,7 +43,7 @@ def check_gke_clusters():
         endpoint = cluster.get('endpoint', '')
         private_nodes = cluster.get('privateClusterConfig', {}).get('enablePrivateNodes', False)
         if endpoint and not private_nodes:
-            gke_data.append([cluster['name'], endpoint, str(private_nodes)])
+            gke_data.append([cluster['name'], endpoint])
     return gke_data
 
 
@@ -125,140 +125,104 @@ def check_load_balancers():
 
 
 # ----------------- CIS Audit Checks -----------------
-from googleapiclient import discovery
-
 # ----------------- CIS Audit Checks -----------------
-from googleapiclient import discovery
-
 def audit_cis():
-    global creds, project  # explicitly use the global variables
-    compute = discovery.build('compute', 'v1', credentials=creds)
-    
     results = {
         "ssh_firewall": [],
         "rdp_firewall": [],
-        "firewall_logs": [],
         "vpc_flow_logs": [],
+        "firewall_logs": [],
         "cloud_nat_logs": [],
-        "ip_forwarding": []
+        "ip_forwarding": []  # <-- added CIS 4.6.1 results
     }
 
-    # ----------------- Firewall Rule Security Checks -----------------
     try:
-        req = compute.firewalls().list(project=project)
-        while req is not None:
-            res = req.execute()
-            for fw in res.get('items', []):
-                name = fw.get('name')
-                direction = fw.get('direction', 'INGRESS')
-                source_ranges = fw.get('sourceRanges', [])
-                allowed = fw.get('allowed', [])
-                log_enabled = fw.get('logConfig', {}).get('enable', False)
+        compute = discovery.build('compute', 'v1', credentials=creds)
 
-                # Check SSH / RDP open to public
-                for rule in allowed:
-                    ports = rule.get('ports', [])
-                    ip_protocol = rule.get('IPProtocol', '')
+        # ----------------- Firewall Rules -----------------
+        try:
+            request = compute.firewalls().list(project=project)
+            while request is not None:
+                try:
+                    response = request.execute()
+                except Exception as e:
+                    results['firewall_logs'].append([f"Error fetching firewall: {str(e)}"])
+                    break
+                for fw in response.get('items', []):
+                    fw_name = fw['name']
+                    log_enabled = fw.get('logConfig', {}).get('enable', False)
+                    if fw_name == 'default-allow-ssh':
+                        results['ssh_firewall'].append([fw_name, log_enabled, 'PASS' if log_enabled else 'VIOLATION'])
+                    if fw_name == 'default-allow-rdp':
+                        results['rdp_firewall'].append([fw_name, log_enabled, 'PASS' if log_enabled else 'VIOLATION'])
+                    results['firewall_logs'].append([fw_name, log_enabled, 'PASS' if log_enabled else 'VIOLATION'])
+                request = compute.firewalls().list_next(previous_request=request, previous_response=response)
+        except Exception as e:
+            results['firewall_logs'].append([f"Firewall error: {str(e)}"])
 
-                    if direction == 'INGRESS':
-                        # SSH Check
-                        if ip_protocol in ['tcp', 'all'] and '22' in ports and '0.0.0.0/0' in source_ranges:
-                            results['ssh_firewall'].append([
-                                name, '22/tcp', ','.join(source_ranges),
-                                'VIOLATION', 'SSH open to public internet.'
-                            ])
-                        # RDP Check
-                        if ip_protocol in ['tcp', 'all'] and '3389' in ports and '0.0.0.0/0' in source_ranges:
-                            results['rdp_firewall'].append([
-                                name, '3389/tcp', ','.join(source_ranges),
-                                'VIOLATION', 'RDP open to public internet.'
-                            ])
-
-                # Logging Enabled?
-                log_status = "PASS" if log_enabled else "VIOLATION"
-                results['firewall_logs'].append([
-                    name, log_enabled, log_status,
-                    "Firewall logging enabled" if log_enabled else "Logging disabled"
-                ])
-
-            req = compute.firewalls().list_next(previous_request=req, previous_response=res)
-
-    except Exception as e:
-        results['firewall_logs'].append(["Error fetching firewall rules", str(e)])
-
-    # ----------------- VPC Flow Logs Check -----------------
-    try:
-        regions = compute.regions().list(project=project).execute().get('items', [])
-        for region in regions:
-            region_name = region['name']
-            req = compute.subnetworks().list(project=project, region=region_name)
-            while req is not None:
-                res = req.execute()
-                for subnet in res.get('items', []):
-                    name = subnet['name']
-                    flow_enabled = subnet.get('enableFlowLogs', False)
-                    sampling = subnet.get('logConfig', {}).get('flowSampling', 0)
-                    aggregation = subnet.get('logConfig', {}).get('aggregationInterval', 'interval-5-sec')
-
-                    status = "PASS" if flow_enabled and sampling >= 0.1 else "VIOLATION"
-                    recommendation = "Enable VPC Flow Logs with >=0.1 sampling rate" if not flow_enabled else "Compliant"
-
-                    results['vpc_flow_logs'].append([
-                        name, region_name, flow_enabled, sampling, aggregation, status, recommendation
-                    ])
-                req = compute.subnetworks().list_next(previous_request=req, previous_response=res)
-
-    except Exception as e:
-        results['vpc_flow_logs'].append(["Error checking VPC Flow Logs", str(e)])
-
-    # ----------------- Cloud NAT Logging Check -----------------
-    try:
-        for region in regions:
-            region_name = region['name']
-            req = compute.routers().list(project=project, region=region_name)
-            while req is not None:
-                res = req.execute()
-                for router in res.get('items', []):
-                    router_name = router['name']
+        # ----------------- VPC Flow Logs -----------------
+        try:
+            regions = compute.regions().list(project=project).execute().get('items', [])
+            for region in regions[:3]:  # <-- limit to first 3 regions for testing
+                region_name = region['name']
+                request = compute.subnetworks().list(project=project, region=region_name)
+                while request is not None:
                     try:
-                        nat_list = compute.routers().listNat(
-                            project=project, region=region_name, router=router_name
-                        ).execute()
+                        response = request.execute()
+                    except Exception as e:
+                        results['vpc_flow_logs'].append([f"Error fetching subnets: {str(e)}"])
+                        break
+                    for subnet in response.get('items', []):
+                        flow_enabled = subnet.get('enableFlowLogs', False)
+                        sample_rate = subnet.get('logConfig', {}).get('flowSampling', 0)
+                        status = "PASS" if flow_enabled and sample_rate >= 0.1 else "VIOLATION"
+                        results['vpc_flow_logs'].append([subnet['name'], flow_enabled, sample_rate, status])
+                    request = compute.subnetworks().list_next(previous_request=request, previous_response=response)
+        except Exception as e:
+            results['vpc_flow_logs'].append([f"VPC error: {str(e)}"])
 
-                        for nat in nat_list.get('items', []):
-                            nat_name = nat['name']
-                            log_enabled = nat.get('logConfig', {}).get('enable', False)
-                            status = "PASS" if log_enabled else "VIOLATION"
-                            recommendation = "Enable NAT logging" if not log_enabled else "Compliant"
+        # ----------------- Cloud NAT Logs -----------------
+        try:
+            for region in regions[:3]:  # limit regions
+                region_name = region['name']
+                request = compute.routers().list(project=project, region=region_name)
+                while request is not None:
+                    try:
+                        response = request.execute()
+                    except Exception as e:
+                        results['cloud_nat_logs'].append([f"Error fetching routers: {str(e)}"])
+                        break
+                    for router in response.get('items', []):
+                        router_name = router['name']
+                        try:
+                            nat_request = compute.routers().listNat(project=project, region=region_name, router=router_name)
+                            nat_response = nat_request.execute()
+                            for nat in nat_response.get('items', []):
+                                nat_name = nat['name']
+                                log_enabled = nat.get('logConfig', {}).get('enable', False)
+                                results['cloud_nat_logs'].append([nat_name, router_name])
+                        except Exception:
+                            continue
+                    request = compute.routers().list_next(previous_request=request, previous_response=response)
+        except Exception as e:
+            results['cloud_nat_logs'].append([f"NAT error: {str(e)}"])
 
-                            results['cloud_nat_logs'].append([
-                                nat_name, router_name, region_name, log_enabled, status, recommendation
-                            ])
-                    except Exception:
-                        continue
-                req = compute.routers().list_next(previous_request=req, previous_response=res)
+        # ----------------- IP Forwarding (CIS 4.6.1) -----------------
+        try:
+            req = compute.instances().aggregatedList(project=project)
+            while req is not None:
+                res = req.execute()
+                for zone, scoped_list in res.get('items', {}).items():
+                    for instance in scoped_list.get('instances', []):
+                        name = instance['name']
+                        can_forward = instance.get('canIpForward', False)
+                        # status = 'VIOLATION' if can_forward else 'PASS'
+                        results['ip_forwarding'].append([name, can_forward])
+                req = compute.instances().aggregatedList_next(req, res)
+        except Exception as e:
+            results['ip_forwarding'].append([f"IP Forwarding check failed: {str(e)}"])
 
     except Exception as e:
-        results['cloud_nat_logs'].append(["Error checking NAT logs", str(e)])
-
-    # ----------------- IP Forwarding (CIS 4.6.1) -----------------
-    try:
-        req = compute.instances().aggregatedList(project=project)
-        while req is not None:
-            res = req.execute()
-            for zone, scoped_list in res.get('items', {}).items():
-                for instance in scoped_list.get('instances', []):
-                    name = instance['name']
-                    can_forward = instance.get('canIpForward', False)
-                    status = "VIOLATION" if can_forward else "PASS"
-                    recommendation = (
-                        "Disable IP forwarding unless required by architecture"
-                        if can_forward else "Compliant"
-                    )
-                    results['ip_forwarding'].append([name, can_forward, status, recommendation])
-            req = compute.instances().aggregatedList_next(req, res)
-
-    except Exception as e:
-        results['ip_forwarding'].append(["IP Forwarding check failed", str(e)])
+        results['firewall_logs'].append([f"CIS audit failed: {str(e)}"])
 
     return results

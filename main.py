@@ -46,11 +46,11 @@ def security_audit(request):
     # ----------------- IP Forwarding Logs -----------------
     for ipf in cis_results.get("ip_forwarding", []):
         # Check if this is an instance result or an error string
-        if isinstance(ipf, list) and len(ipf) == 3:
-            ip_forwarding.append(["Compute Instance", ipf[0], "canIpForward: " + str(ipf[1]), ipf[2]])
+        if isinstance(ipf, list) and len(ipf) == 4:
+            ip_forwarding.append(["Compute Instance", ipf[0], "canIpForward: " + str(ipf[1]), ipf[2], ipf[3]])
         else:
-            # Error message
             ip_forwarding.append(["Compute Instance", str(ipf), "", "ERROR"])
+
 
     # ----------------- Create Excel -----------------
     excel_path = create_excel_report(
@@ -119,3 +119,4 @@ def security_audit(request):
     response = make_response(html)
     response.headers['Content-Type'] = 'text/html'
     return response
+

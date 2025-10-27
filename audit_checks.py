@@ -128,8 +128,12 @@ def check_load_balancers():
 from googleapiclient import discovery
 
 # ----------------- CIS Audit Checks -----------------
-def audit_cis(project, creds):
+from googleapiclient import discovery
+
+def audit_cis():
+    global creds, project  # explicitly use the global variables
     compute = discovery.build('compute', 'v1', credentials=creds)
+    
     results = {
         "ssh_firewall": [],
         "rdp_firewall": [],
@@ -258,5 +262,3 @@ def audit_cis(project, creds):
         results['ip_forwarding'].append(["IP Forwarding check failed", str(e)])
 
     return results
-
-

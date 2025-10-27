@@ -234,4 +234,100 @@ def check_firewall_rules():
 
     return firewall_data
 
+---------------------------------clould_function_and_run ---------------------------------------------------
+def check_cloud_functions_and_run():
+    creds, project = default()
+    functions_service = discovery.build('cloudfunctions', 'v1', credentials=creds)
+    run_service = discovery.build('run', 'v1', credentials=creds)
+
+    audit_data = []
+
+    # -------------------- Cloud Functions --------------------
+    try:
+        func_req = functions_service.projects().locations().list(
+            name=f"projects/{project}/locations/-"
+        )
+        func_res = func_req.execute()
+        for loc in func_res.get('locations', []):
+            region = loc['locationId']
+            req = functions_service.projects().locations().functions().list(
+                parent=f"projects/{project}/locations/{region}"
+            )
+            res = req.execute()
+            for fn in res.get('functions', []):
+                name = fn.get('name', '').split('/')[-1]
+                entry_point = fn.get('entryPoint', 'N/A')
+                runtime = fn.get('runtime', 'N/A')
+                trigger_type = 'HTTP' if 'httpsTrigger' in fn else 'Event'
+                url = fn.get('httpsTrigger', {}).get('url', 'N/A')
+                ingress = fn.get('ingressSettings', 'N/A')
+                auth = fn.get('httpsTrigger', {}).get('securityLevel', 'N/A')
+                service_account = fn.get('serviceAccountEmail', 'N/A')
+
+                # Security findings
+                unauthenticated = 'Yes' if 'httpsTrigger' in fn and fn['httpsTrigger'].get('url') and 'allowUnauthenticated' in fn.get('labels', {}) else 'Unknown'
+                exposure_risk = 'High' if ingress == 'ALLOW_ALL' else 'Medium' if ingress == 'ALLOW_INTERNAL_AND_GCLB' else 'Low'
+
+                audit_data.append([
+                    "Cloud Function",
+                    name,
+                    region,
+                    runtime,
+                    trigger_type,
+                    url,
+                    ingress,
+                    auth,
+                    service_account,
+                    unauthenticated,
+                    exposure_risk
+                ])
+    except Exception as e:
+        audit_data.append(["Cloud Function", f"Error fetching: {str(e)}"])
+
+    # -------------------- Cloud Run --------------------
+    try:
+        req = run_service.projects().locations().services().list(
+            parent=f"projects/{project}/locations/-"
+        )
+        res = req.execute()
+        for service in res.get('items', []):
+            name = service.get('metadata', {}).get('name', '')
+            region = service.get('metadata', {}).get('namespace', '')
+            url = service.get('status', {}).get('url', 'N/A')
+            annotations = service.get('metadata', {}).get('annotations', {})
+            ingress = annotations.get('run.googleapis.com/ingress', 'N/A')
+            launch_stage = service.get('metadata', {}).get('labels', {}).get('run.googleapis.com/launch-stage', 'N/A')
+
+            # IAM Policy check
+            try:
+                policy = run_service.projects().locations().services().getIamPolicy(
+                    resource=service['metadata']['selfLink']
+                ).execute()
+                members = [m for b in policy.get('bindings', []) for m in b.get('members', [])]
+                unauthenticated = any('allUsers' in m or 'allAuthenticatedUsers' in m for m in members)
+            except Exception:
+                unauthenticated = 'Unknown'
+
+            exposure_risk = 'High' if ingress == 'all' or unauthenticated else 'Low'
+
+            audit_data.append([
+                "Cloud Run",
+                name,
+                region,
+                "N/A",
+                "HTTP",
+                url,
+                ingress,
+                "N/A",
+                "N/A",
+                "Yes" if unauthenticated else "No",
+                exposure_risk
+            ])
+    except Exception as e:
+        audit_data.append(["Cloud Run", f"Error fetching: {str(e)}"])
+
+    return audit_data
+
+
+
 

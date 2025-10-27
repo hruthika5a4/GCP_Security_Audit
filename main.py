@@ -1,5 +1,13 @@
 from flask import make_response
-from audit_checks import *
+from audit_checks import (
+    check_compute_public_ips,
+    check_sql_public_ips,
+    check_gke_clusters,
+    check_owner_service_accounts,
+    check_public_buckets,
+    check_firewall_rules,
+    check_load_balancers_audit  # updated version
+)
 from report_excel import create_excel_report
 from report_email import send_audit_email
 from datetime import datetime
@@ -21,10 +29,10 @@ def get_recommendation(category, row):
         text = "Avoid using 'Owner' role; follow least privilege principle."
     elif "bucket" in category:
         text = "Remove public access; apply uniform bucket-level access."
-    elif "load balancer" in category:
-        text = "Restrict frontend access to trusted IP ranges or use Cloud Armor."
     elif "firewall" in category:
         text = "Avoid using 0.0.0.0/0 in firewall rules; restrict to trusted IP ranges."
+    elif "load balancer" in category:
+        text = "Ensure HTTPS redirection, valid SSL certificates, and strong Cloud Armor policies."
 
     return text
 
@@ -33,13 +41,13 @@ def security_audit(request):
     creds, project = default()
 
     # ----------------- Run checks -----------------
-    vm_data = check_compute_public_ips()          # [["vm-name", "zone", "ip"], ...]
-    sql_data = check_sql_public_ips()             # [["sql-instance", "public-ip"], ...]
-    gke_data = check_gke_clusters()               # [["cluster-name", "endpoint"], ...]
-    owner_data = check_owner_service_accounts()   # [["account", "role"], ...]
-    bucket_data = check_public_buckets()          # [["bucket-name", "role", "entity"], ...]
-    lb_data = check_load_balancers()              # [["lb-name", "type"], ...]
-    fw_data = check_firewall_rules()              # [["rule-name", "direction", "protocols", "sourceRanges", ...]]
+    vm_data = check_compute_public_ips()
+    sql_data = check_sql_public_ips()
+    gke_data = check_gke_clusters()
+    owner_data = check_owner_service_accounts()
+    bucket_data = check_public_buckets()
+    fw_data = check_firewall_rules()
+    lb_data = check_load_balancers_audit()  # new extended LB check
 
     # ----------------- Excel + Email -----------------
     excel_path = create_excel_report(
@@ -108,7 +116,11 @@ def security_audit(request):
         ("IAM Owners", owner_data, ["Account", "Role"]),
         ("Buckets", bucket_data, ["Bucket Name", "Access Level", "Entity"]),
         ("Firewall Rules", fw_data, ["Rule Name", "Direction", "Protocols", "Source Ranges", "Network", "Priority", "Disabled"]),
-        ("Load Balancers", lb_data, ["LB Name", "Type"]),
+        ("Load Balancers", lb_data, [
+            "LB Name", "Scheme", "IP", "Target", "SSL Policy",
+            "SSL Cert Status", "HTTPS Redirect", "Cloud Armor Policy",
+            "Armor Rule Strength", "Internal Exposure"
+        ]),
     ]
 
     # ----------------- Build tables dynamically -----------------
@@ -122,12 +134,21 @@ def security_audit(request):
             for h in headers:
                 html += f"<th>{h}</th>"
             html += "<th>Recommendation</th></tr></thead><tbody>"
+
             for row in data:
                 html += "<tr class='hover:bg-gray-50'>"
-                for cell in row:
-                    html += f"<td>{str(cell)}</td>"
+                # handle both dicts and lists
+                if isinstance(row, dict):
+                    for key in ["name", "scheme", "ip", "target", "ssl_policy",
+                                "ssl_cert_status", "https_redirect", "cloud_armor_policy",
+                                "armor_rule_strength", "internal_exposure"]:
+                        html += f"<td>{row.get(key, '')}</td>"
+                else:
+                    for cell in row:
+                        html += f"<td>{str(cell)}</td>"
                 rec = get_recommendation(category, row)
                 html += f"<td>{rec}</td></tr>"
+
             html += "</tbody></table></div>"
         else:
             html += "<p class='text-green-600 font-medium'>No issues found.</p>"

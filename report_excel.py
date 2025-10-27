@@ -13,7 +13,7 @@ def auto_fit_columns(ws):
                 cell_length = len(str(cell.value))
                 if cell_length > max_length:
                     max_length = cell_length
-            except:
+            except Exception:
                 pass
         ws.column_dimensions[column_letter].width = max_length + 2
 
@@ -31,10 +31,12 @@ def add_sheet(wb, name, headers, data):
 
     if data:
         for d in data:
-            if isinstance(d, dict):  # flatten dict rows (for LB)
+            if isinstance(d, dict):
                 ws.append(list(d.values()))
-            else:
+            elif isinstance(d, (list, tuple)):
                 ws.append(d)
+            else:
+                ws.append([str(d)])
     else:
         ws.append(["✅ No issues found."])
 
@@ -83,6 +85,7 @@ def add_orgpolicy_sheet(wb, org_data):
     add_sheet(wb, "OrgPolicy", headers, org_data)
 
 
+# ------------------ Fixed Load Balancer Sheet ------------------
 def add_lb_sheet(wb, lb_data):
     headers = [
         "LB Name", "Scope", "LB Type", "Target Type", "IP", "Protocol", "Port Range",
@@ -93,6 +96,7 @@ def add_lb_sheet(wb, lb_data):
     ws = wb.create_sheet("LoadBalancers")
     ws.append(headers)
 
+    # Header styling
     for c in ws[1]:
         c.font = Font(bold=True, color="FFFFFF")
         c.fill = PatternFill("solid", fgColor="4F81BD")
@@ -100,6 +104,22 @@ def add_lb_sheet(wb, lb_data):
 
     if lb_data:
         for d in lb_data:
+            if not isinstance(d, dict):
+                # Skip or flatten invalid data types
+                ws.append([str(d)])
+                continue
+
+            backend_services = d.get("backend_services", [])
+            if isinstance(backend_services, list):
+                backend_info = "; ".join([
+                    f"{b.get('backend_service', '-')}"
+                    f" (logging: {b.get('logging_enabled', '-')}, "
+                    f"CloudRun: {b.get('cloud_run_service', '-')})"
+                    for b in backend_services if isinstance(b, dict)
+                ])
+            else:
+                backend_info = str(backend_services)
+
             row = [
                 d.get('name'),
                 d.get('scope'),
@@ -113,8 +133,7 @@ def add_lb_sheet(wb, lb_data):
                 d.get('ssl_min_tls'),
                 d.get('ssl_recommendation'),
                 d.get('tls_recommendation'),
-                "; ".join([f"{b['backend_service']} (logging: {b.get('logging_enabled')}, CloudRun: {b.get('cloud_run_service', '-')})"
-                           for b in d.get('backend_services', [])]),
+                backend_info,
                 d.get('recommendation')
             ]
             ws.append(row)
@@ -132,7 +151,8 @@ def add_ip_forwarding_sheet(wb, ip_forwarding):
 
 # ------------------ Main Function ------------------
 def create_excel_report(project, vm_data, sql_data, gke_data, owner_data, bucket_data,
-                        networking_data, logging_data, org_data, ip_forwarding=None, lb_data=None):
+                        networking_data, logging_data, org_data,
+                        ip_forwarding=None, lb_data=None):
     wb = Workbook()
     summary = wb.active
     summary.title = "Summary"
@@ -140,7 +160,7 @@ def create_excel_report(project, vm_data, sql_data, gke_data, owner_data, bucket
 
     # Summary Sheet
     summary.append([
-        "Project ID", "Audit Time", "VMs", "SQL", "GKE", "Owners", 
+        "Project ID", "Audit Time", "VMs", "SQL", "GKE", "Owners",
         "Buckets", "Load Balancers", "IP Forwarding Issues"
     ])
     summary.append([

@@ -22,13 +22,6 @@ def get_recommendation(category, row):
         text = "Remove public access; apply uniform bucket-level access."
     elif "load balancer" in category:
         text = "Restrict frontend access to trusted IP ranges or use Cloud Armor."
-    elif "firewall" in category or "logging" in category:
-        text = "Enable firewall and VPC flow logging for better visibility."
-    elif "network" in category:
-        text = "Restrict open ports (SSH/RDP) and apply IP-based filtering."
-    elif "ip forwarding" in category:
-        text = "Disable IP forwarding unless the VM is a NAT/router."
-    return text
 
 
 def security_audit(request):
@@ -41,34 +34,12 @@ def security_audit(request):
     owner_data = check_owner_service_accounts()   # [["account", "role"], ...]
     bucket_data = check_public_buckets()          # [["bucket-name", "role", "entity"], ...]
     lb_data = check_load_balancers()              # [["lb-name", "type"], ...]
-    cis_results = audit_cis()
-
-    networking_data, logging_data, org_data, ip_forwarding = [], [], [], []
-
-    # CIS checks formatting
-    for ssh in cis_results.get("ssh_firewall", []):
-        networking_data.append(["SSH Firewall", ssh[0], f"Logging Enabled: {ssh[1]}"])
-    for rdp in cis_results.get("rdp_firewall", []):
-        networking_data.append(["RDP Firewall", rdp[0], f"Logging Enabled: {rdp[1]}"])
-    for fw in cis_results.get("firewall_logs", []):
-        logging_data.append(["Firewall Rule", fw[0], f"Logging Enabled: {fw[1]}"])
-    for vpc in cis_results.get("vpc_flow_logs", []):
-        logging_data.append(["VPC Flow Logs", vpc[0], f"Flow Enabled: {vpc[1]}, Sample Rate: {vpc[2]}"])
-    for nat in cis_results.get("cloud_nat_logs", []):
-        logging_data.append(["Cloud NAT", nat[0], f"Router: {nat[1]}, Logging Enabled: {nat[2]}"])
-    for ipf in cis_results.get("ip_forwarding", []):
-        if isinstance(ipf, list) and len(ipf) == 3:
-            ip_forwarding.append(["Compute Instance", ipf[0], f"canIpForward: {ipf[1]}"])
-        else:
-            ip_forwarding.append(["Compute Instance", str(ipf)])
-
     # ----------------- Excel + Email -----------------
     excel_path = create_excel_report(
         project, vm_data, sql_data, gke_data, owner_data,
-        bucket_data, networking_data, logging_data, org_data,
-        lb_data, ip_forwarding
+        bucket_data, networking_data, lb_data
     )
-    status = send_audit_email(project, excel_path, "pradeepsinghania906@gmail.com")
+    status = send_audit_email(project, excel_path, "hruthika.sa@cloudambassadors.com")
 
     # ----------------- HTML UI -----------------
     html = f"""
@@ -123,9 +94,6 @@ def security_audit(request):
         ("IAM Owners", owner_data, ["Account", "Role"]),
         ("Buckets", bucket_data, ["Bucket Name", "Access Level", "Entity"]),
         ("Load Balancers", lb_data, ["LB Name", "Type"]),
-        ("Logging Checks", logging_data, ["Resource", "Details", "Logging Enabled Status"]),
-        ("Networking Checks", networking_data, ["Resource", "Rule", "Status"]),
-        ("IP Forwarding", ip_forwarding, ["Type", "Instance"]),
     ]
 
     # ----------------- Build tables -----------------
@@ -162,3 +130,4 @@ def security_audit(request):
     response = make_response(html)
     response.headers['Content-Type'] = 'text/html'
     return response
+

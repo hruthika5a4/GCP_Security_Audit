@@ -3,6 +3,7 @@ from audit_checks import *
 from report_excel import create_excel_report
 from report_email import send_audit_email
 from datetime import datetime
+from google.auth import default
 
 
 def get_recommendation(category, row):
@@ -22,6 +23,10 @@ def get_recommendation(category, row):
         text = "Remove public access; apply uniform bucket-level access."
     elif "load balancer" in category:
         text = "Restrict frontend access to trusted IP ranges or use Cloud Armor."
+    elif "firewall" in category:
+        text = "Avoid using 0.0.0.0/0 in firewall rules; restrict to trusted IP ranges."
+
+    return text
 
 
 def security_audit(request):
@@ -34,10 +39,18 @@ def security_audit(request):
     owner_data = check_owner_service_accounts()   # [["account", "role"], ...]
     bucket_data = check_public_buckets()          # [["bucket-name", "role", "entity"], ...]
     lb_data = check_load_balancers()              # [["lb-name", "type"], ...]
+    fw_data = check_firewall_rules()              # [["rule-name", "direction", "protocols", "sourceRanges", ...]]
+
     # ----------------- Excel + Email -----------------
     excel_path = create_excel_report(
-        project, vm_data, sql_data, gke_data, owner_data,
-        bucket_data, networking_data, lb_data
+        project,
+        vm_data,
+        sql_data,
+        gke_data,
+        owner_data,
+        bucket_data,
+        fw_data,
+        lb_data
     )
     status = send_audit_email(project, excel_path, "hruthika.sa@cloudambassadors.com")
 
@@ -87,16 +100,18 @@ def security_audit(request):
             </p>
     """
 
+    # ----------------- Sections for HTML -----------------
     sections = [
         ("Compute Engine", vm_data, ["Instance Name", "Zone", "External IP"]),
         ("Cloud SQL", sql_data, ["Instance Name", "Public IP"]),
         ("GKE Clusters", gke_data, ["Cluster Name", "Endpoint"]),
         ("IAM Owners", owner_data, ["Account", "Role"]),
         ("Buckets", bucket_data, ["Bucket Name", "Access Level", "Entity"]),
+        ("Firewall Rules", fw_data, ["Rule Name", "Direction", "Protocols", "Source Ranges", "Network", "Priority", "Disabled"]),
         ("Load Balancers", lb_data, ["LB Name", "Type"]),
     ]
 
-    # ----------------- Build tables -----------------
+    # ----------------- Build tables dynamically -----------------
     for category, data, headers in sections:
         html += f"""
         <div class='border border-gray-200 rounded-lg p-4 mb-6'>
@@ -130,4 +145,3 @@ def security_audit(request):
     response = make_response(html)
     response.headers['Content-Type'] = 'text/html'
     return response
-

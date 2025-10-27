@@ -178,7 +178,6 @@ def check_load_balancers_audit():
                     'name': lb_name,
                     'scheme': scheme,
                     'ip': ip,
-                    'target': target,
                     'ssl_policy': ssl_policy,
                     'ssl_cert_status': ssl_cert_status,
                     'https_redirect': https_redirect,
@@ -234,6 +233,5 @@ def check_firewall_rules():
         firewall_data.append([f"Error fetching firewall rules: {str(e)}"])
 
     return firewall_data
-
 
 

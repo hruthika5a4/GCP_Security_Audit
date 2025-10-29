@@ -1,6 +1,6 @@
 #!/bin/bash
 # ======================================================
-# 🚀 Auto-Deploy Script: GCP Security Audit Cloud Function
+# 🚀 Auto-Deploy Script: GCP Security Audit Cloud Function + Cloud Scheduler
 # ======================================================
 
 set -e
@@ -8,9 +8,10 @@ set -e
 # --- CONFIGURATION ---
 PROJECT_ID=$(gcloud config get-value project 2>/dev/null)
 REGION="asia-south1"
-FUNCTION_NAME="security_audit_1"
-ENTRY_POINT="GCP_Security_Audit"
-RUNTIME="python311"
+FUNCTION_NAME="security_audit_001"
+ENTRY_POINT="security_audit"
+RUNTIME="python312"
+SCHEDULER_JOB_NAME="auto-audit-trigger"
 
 echo "-----------------------------------------"
 echo "🔹 Starting Security Audit Cloud Function Setup"
@@ -28,26 +29,54 @@ echo "✅ Using Project: $PROJECT_ID"
 echo "🔄 Enabling necessary APIs..."
 gcloud services enable \
   cloudfunctions.googleapis.com \
+  cloudscheduler.googleapis.com \
   cloudbuild.googleapis.com \
   artifactregistry.googleapis.com \
   iam.googleapis.com
 
-# --- Step 3: Install Dependencies ---
-if [[ -f requirements.txt ]]; then
-  echo "📦 Installing dependencies..."
-  pip install -r requirements.txt -t lib/
-fi
-
-# --- Step 4: Deploy Function ---
-echo "🚀 Deploying Cloud Function..."
-gcloud functions deploy security_audit_001 \
-  --runtime python312 \
+# --- Step 3: Deploy Cloud Function ---
+echo "🚀 Deploying Cloud Function: $FUNCTION_NAME ..."
+gcloud functions deploy $FUNCTION_NAME \
+  --runtime $RUNTIME \
   --trigger-http \
   --allow-unauthenticated \
-  --region=asia-south1 \
-  --entry-point=security_audit
+  --region=$REGION \
+  --entry-point=$ENTRY_POINT
 
+# --- Step 4: Fetch Function URL ---
+echo "🌐 Fetching function URL..."
+FUNCTION_URL=$(gcloud functions describe $FUNCTION_NAME \
+  --region $REGION \
+  --format 'value(httpsTrigger.url)')
 
-echo "✅ Deployment Complete!"
-echo "🌐 Function URL: $URL"
-echo "-----------------------------------------"
+if [[ -z "$FUNCTION_URL" ]]; then
+  echo "❌ Error: Unable to fetch Cloud Function URL."
+  exit 1
+fi
+
+echo "✅ Cloud Function URL: $FUNCTION_URL"
+
+# --- Step 5: Create or Update Cloud Scheduler Job ---
+echo "⏰ Setting up Cloud Scheduler job: $SCHEDULER_JOB_NAME ..."
+
+if gcloud scheduler jobs describe $SCHEDULER_JOB_NAME --location=$REGION >/dev/null 2>&1; then
+  echo "🔄 Job exists. Updating..."
+  gcloud scheduler jobs update http $SCHEDULER_JOB_NAME \
+    --schedule="*/2 * * * *" \
+    --time-zone="Asia/Kolkata" \
+    --uri="$FUNCTION_URL" \
+    --http-method=GET \
+    --location=$REGION \
+    --description="Triggers Security Audit Function every 2 minutes"
+else
+  echo "🆕 Creating new job..."
+  gcloud scheduler jobs create http $SCHEDULER_JOB_NAME \
+    --schedule="*/2 * * * *" \
+    --time-zone="Asia/Kolkata" \
+    --uri="$FUNCTION_URL" \
+    --http-method=GET \
+    --location=$REGION \
+    --description="Triggers Security Audit Function every 2 minutes"
+fi
+
+echo "✅ Cloud Scheduler setup complete!"

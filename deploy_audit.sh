@@ -81,3 +81,10 @@ else
 fi
 
 echo "✅ Cloud Scheduler setup complete!"
+
+
+# --- Step 6: Force Run Scheduler Job ---
+echo "🚀 Triggering the Cloud Scheduler job immediately..."
+gcloud scheduler jobs run $SCHEDULER_JOB_NAME --location=$REGION
+
+echo "✅ Cloud Scheduler job executed successfully!"

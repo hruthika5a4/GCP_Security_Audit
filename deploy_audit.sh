@@ -8,7 +8,7 @@ set -e
 # --- CONFIGURATION ---
 PROJECT_ID=$(gcloud config get-value project 2>/dev/null)
 REGION="asia-south1"
-FUNCTION_NAME="security_audit_002"
+FUNCTION_NAME="security_audit_003"
 ENTRY_POINT="security_audit"
 RUNTIME="python312"
 SCHEDULER_JOB_NAME="auto-audit-trigger"
@@ -46,8 +46,8 @@ gcloud functions deploy $FUNCTION_NAME \
 # --- Step 4: Fetch Function URL ---
 echo "🌐 Fetching function URL..."
 FUNCTION_URL=$(gcloud functions describe $FUNCTION_NAME \
-  --region $REGION \
-  --format 'value(httpsTrigger.url)')
+  --region=$REGION \
+  --format='value(serviceConfig.uri)')
 
 if [[ -z "$FUNCTION_URL" ]]; then
   echo "❌ Error: Unable to fetch Cloud Function URL."
@@ -55,6 +55,7 @@ if [[ -z "$FUNCTION_URL" ]]; then
 fi
 
 echo "✅ Cloud Function URL: $FUNCTION_URL"
+
 
 # --- Step 5: Create or Update Cloud Scheduler Job ---
 echo "⏰ Setting up Cloud Scheduler job: $SCHEDULER_JOB_NAME ..."

@@ -26,7 +26,7 @@ def get_recommendation(category, row):
         text = "Use private IP for Cloud SQL and restrict public access."
     elif "gke" in category:
         text = "Restrict public endpoint access and enable authorized networks."
-    elif "Service Accounts with Owner Role" in category:
+    elif "service accounts with owner role" in category:
         text = "Avoid using 'Owner' role; follow least privilege principle."
     elif "bucket" in category:
         text = "Remove public access; apply uniform bucket-level access."
@@ -173,4 +173,5 @@ def security_audit(request):
     response = make_response(html)
     response.headers['Content-Type'] = 'text/html'
     return response
+
 

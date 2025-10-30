@@ -8,7 +8,7 @@ set -e
 # --- CONFIGURATION ---
 PROJECT_ID=$(gcloud config get-value project 2>/dev/null)
 REGION="asia-south1"
-FUNCTION_NAME="security_audit_004"
+FUNCTION_NAME="security_audit_005"
 ENTRY_POINT="security_audit"
 RUNTIME="python312"
 SCHEDULER_JOB_NAME="auto-audit-trigger"
@@ -113,29 +113,31 @@ echo "✅ Using Cron Schedule: $CRON_SCHEDULE"
 echo ""
 
 # --- Step 5: Create or Update Cloud Scheduler Job ---
+# --- Step 5: Create or Update Cloud Scheduler Job ---
 echo "⏰ Setting up Cloud Scheduler job: $SCHEDULER_JOB_NAME ..."
 
 if gcloud scheduler jobs describe $SCHEDULER_JOB_NAME --location=$REGION >/dev/null 2>&1; then
   echo "🔄 Job exists. Updating..."
   gcloud scheduler jobs update http $SCHEDULER_JOB_NAME \
-    --schedule= $CRON_SCHEDULE \
+    --schedule="$CRON_SCHEDULE" \
     --time-zone="Asia/Kolkata" \
     --uri="$FUNCTION_URL" \
     --http-method=GET \
     --location=$REGION \
-    --description="Triggers Security Audit Function every 2 minutes"
+    --description="Triggers Security Audit Function"
 else
   echo "🆕 Creating new job..."
   gcloud scheduler jobs create http $SCHEDULER_JOB_NAME \
-    --schedule="*/2 * * * *" \
+    --schedule="$CRON_SCHEDULE" \
     --time-zone="Asia/Kolkata" \
     --uri="$FUNCTION_URL" \
     --http-method=GET \
     --location=$REGION \
-    --description="Triggers Security Audit Function every 2 minutes"
+    --description="Triggers Security Audit Function"
 fi
 
 echo "✅ Cloud Scheduler setup complete!"
+
 
 
 # --- Step 6: Force Run Scheduler Job ---

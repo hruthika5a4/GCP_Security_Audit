@@ -8,7 +8,7 @@ set -e
 # --- CONFIGURATION ---
 PROJECT_ID=$(gcloud config get-value project 2>/dev/null)
 REGION="asia-south1"
-FUNCTION_NAME="security_audit_006"
+FUNCTION_NAME="security_audit_007"
 ENTRY_POINT="security_audit"
 RUNTIME="python312"
 SCHEDULER_JOB_NAME="auto-audit-trigger"

@@ -8,7 +8,7 @@ set -e
 # --- CONFIGURATION ---
 PROJECT_ID=$(gcloud config get-value project 2>/dev/null)
 REGION="asia-south1"
-FUNCTION_NAME="security_audit_005"
+FUNCTION_NAME="security_audit_006"
 ENTRY_POINT="security_audit"
 RUNTIME="python312"
 SCHEDULER_JOB_NAME="auto-audit-trigger"
@@ -140,12 +140,13 @@ echo "✅ Cloud Scheduler setup complete!"
 
 
 # --- Step 6: Force Run Scheduler Job ---
-echo "▶️ Enabling the Cloud Scheduler job before running..."
-gcloud scheduler jobs enable $SCHEDULER_JOB_NAME --location=$REGION
+echo "▶️ Resuming the Cloud Scheduler job before running..."
+gcloud scheduler jobs resume $SCHEDULER_JOB_NAME --location=$REGION
 
 echo "🚀 Triggering the Cloud Scheduler job immediately..."
 gcloud scheduler jobs run $SCHEDULER_JOB_NAME --location=$REGION
 
 echo "✅ Cloud Scheduler job executed successfully!"
+
 
 

@@ -16,7 +16,6 @@ from google.auth import default
 
 
 def get_recommendation(category, row):
-    """Generate recommendation text based on category"""
     category = category.lower()
     text = "No issues found."
 
@@ -36,14 +35,12 @@ def get_recommendation(category, row):
         text = "Ensure HTTPS redirection, valid SSL certificates, and strong Cloud Armor policies."
     elif "cloud function" in category or "cloud run" in category:
         text = "Restrict unauthenticated invocations and use ingress controls for internal-only access."
-
     return text
 
 
 def security_audit(request):
     creds, project = default()
 
-    # ----------------- Run all security checks -----------------
     vm_data = check_compute_public_ips()
     sql_data = check_sql_public_ips()
     gke_data = check_gke_clusters()
@@ -51,28 +48,20 @@ def security_audit(request):
     bucket_data = check_public_buckets()
     fw_data = check_firewall_rules()
     lb_data = check_load_balancers_audit()
-    cf_data = check_cloud_functions_and_run()  # ✅ Cloud Functions + Cloud Run check
+    cf_data = check_cloud_functions_and_run()
 
-    # ----------------- Excel + Email -----------------
     excel_path = create_excel_report(
-        project,
-        vm_data,
-        sql_data,
-        gke_data,
-        owner_data,
-        bucket_data,
-        fw_data,
-        lb_data,
-        cf_data  # ✅ Include new audit data
+        project, vm_data, sql_data, gke_data, owner_data,
+        bucket_data, fw_data, lb_data, cf_data
     )
     status = send_audit_email(project, excel_path, "hruthika.sa@cloudambassadors.com")
 
-    # ----------------- HTML UI -----------------
     html = f"""
     <html>
     <head>
         <title>GCP Security Audit Dashboard</title>
         <script src="https://cdn.tailwindcss.com"></script>
+
         <style>
             th, td {{
                 padding: 8px 10px;
@@ -100,8 +89,49 @@ def security_audit(request):
             .print-btn:hover {{
                 background-color: #1d4ed8;
             }}
+
+            /* ✅ PRINT / PDF FIXES */
+            @media print {{
+                @page {{
+                    size: A4 landscape;
+                    margin: 8mm;
+                }}
+
+                body {{
+                    -webkit-print-color-adjust: exact;
+                    print-color-adjust: exact;
+                    font-size: 10px;
+                }}
+
+                table {{
+                    width: 100% !important;
+                    font-size: 9px;
+                }}
+
+                th, td {{
+                    padding: 4px;
+                    border: 1px solid #000;
+                    white-space: normal;
+                    word-wrap: break-word;
+                }}
+
+                /* Scale table to fit page if wide */
+                .max-w-7xl {{
+                    width: 100% !important;
+                }}
+
+                .overflow-x-auto {{
+                    overflow: visible !important;
+                }}
+
+                /* Hide print button on PDF */
+                .print-btn {{
+                    display: none !important;
+                }}
+            }}
         </style>
     </head>
+
     <body class="bg-gray-50 text-gray-900">
         <div class="max-w-7xl mx-auto mt-10 p-6 bg-white shadow-lg rounded-lg">
             <div class="flex justify-between items-center mb-4">
@@ -113,7 +143,6 @@ def security_audit(request):
             </p>
     """
 
-    # ----------------- Sections for HTML -----------------
     sections = [
         ("Compute Engine", vm_data, ["Instance Name", "Zone", "External IP"]),
         ("Cloud SQL", sql_data, ["Instance Name", "Public IP"]),
@@ -122,9 +151,8 @@ def security_audit(request):
         ("Buckets", bucket_data, ["Bucket Name", "Access Level", "Entity"]),
         ("Firewall Rules", fw_data, ["Rule Name", "Direction", "Protocols", "Source Ranges", "Network", "Priority", "Disabled"]),
         ("Load Balancers", lb_data, [
-            "LB Name", "Scheme", "IP", "SSL Policy",
-            "SSL Cert Status", "HTTPS Redirect", "Cloud Armor Policy",
-            "Armor Rule Strength", "Internal Exposure"
+            "LB Name", "Scheme", "IP", "SSL Policy", "SSL Cert Status",
+            "HTTPS Redirect", "Cloud Armor Policy", "Armor Rule Strength", "Internal Exposure"
         ]),
         ("Cloud Functions & Cloud Run", cf_data, [
             "Resource Type", "Name", "Region", "Runtime", "Trigger Type",
@@ -133,7 +161,6 @@ def security_audit(request):
         ])
     ]
 
-    # ----------------- Build tables dynamically -----------------
     for category, data, headers in sections:
         html += f"""
         <div class='border border-gray-200 rounded-lg p-4 mb-6'>
@@ -153,8 +180,7 @@ def security_audit(request):
                 else:
                     for cell in row:
                         html += f"<td>{str(cell)}</td>"
-                rec = get_recommendation(category, row)
-                html += f"<td>{rec}</td></tr>"
+                html += f"<td>{get_recommendation(category, row)}</td></tr>"
 
             html += "</tbody></table></div>"
         else:
@@ -173,5 +199,3 @@ def security_audit(request):
     response = make_response(html)
     response.headers['Content-Type'] = 'text/html'
     return response
-
-
